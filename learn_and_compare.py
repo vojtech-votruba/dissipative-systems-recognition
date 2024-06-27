@@ -45,6 +45,8 @@ DEVICE = (
     else "cpu"
 )
 
+torch.set_default_device(DEVICE)
+
 class TrajectoryModel(nn.Module):
     def __init__(self):
         super().__init__()

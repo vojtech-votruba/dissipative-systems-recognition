@@ -25,8 +25,8 @@ args = parser.parse_args()
 data = []
 
 for n in range(args.num):
-    x = np.array([100*np.random.random() for i in range(args.dim)])
-    p = np.array([100*np.random.random() for i in range(args.dim)])
+    x = np.array([100*(0.5-np.random.random()) for i in range(args.dim)])
+    p = np.array([100*(0.5-np.random.random()) for i in range(args.dim)])
     time = 0
     dataset = []
     for i in range(args.points):
