@@ -49,7 +49,6 @@ parser.add_argument('--train', default=True, action=argparse.BooleanOptionalActi
 parser.add_argument('--plot', default=True, action=argparse.BooleanOptionalAction, help="option of plotting the loss function")
 args = parser.parse_args()
 
-# Defining the neural network
 DEVICE = (
     "cuda"
     if torch.cuda.is_available()
@@ -59,20 +58,20 @@ DEVICE = (
 )
 
 torch.set_default_device(DEVICE)
+print(f"Using {DEVICE} for tensor calculation")
 
-print(f"Using {DEVICE}")
-
+# Defining the neural network
 class EntropyNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.S = nn.Sequential(
-            nn.Linear(DIMENSION, 30).double(),
+            nn.Linear(DIMENSION, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 30).double(),
+            nn.Linear(50, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 30).double(),
+            nn.Linear(50, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 1).double()
+            nn.Linear(50, 1).double()
         )
 
     def forward(self, x):
@@ -82,13 +81,13 @@ class DissipationNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.Xi = nn.Sequential(
-            nn.Linear(DIMENSION, 30).double(),
+            nn.Linear(2*DIMENSION, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 30).double(),
+            nn.Linear(50, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 30).double(),
+            nn.Linear(50, 50).double(),
             nn.Softplus(),
-            nn.Linear(30, 1).double()
+            nn.Linear(50, 1).double()
         )
 
     def forward(self, x):
@@ -103,16 +102,16 @@ class GradientDynamics(nn.Module):
     def forward(self, x):
         S = self.S(x)
         x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0]
-        input = torch.cat((x,x_star))
+        input = torch.cat((x,x_star), dim=1)
+
         Xi = self.Xi(input)
         x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
 
         return [Xi,x_dot]
     
-    def potential(self,x_star):
-        x_star_tensor = torch.tensor(x_star)
-        x = torch.zeros_like(x_star)
-        input = torch.cat((x,x_star_tensor))
+    def dissipation(self,x_star_tensor):
+        zeros_column = torch.zeros_like(x_star_tensor, dtype=torch.float64)
+        input = torch.stack((zeros_column, x_star_tensor), dim=1)
         return self.Xi(input)
 
 L = nn.MSELoss()
@@ -148,6 +147,8 @@ MSE_test_set = L(model(reshaped_test_data)[1]*args.dt+reshaped_test_data, reshap
 print(f"MSE on the test set is: {MSE_test_set}")
 
 if args.plot:
+    plt.style.use('ggplot')
+    # Plotting the MSE decline
     if args.train:
         fig1,ax1 = plt.subplots()
         ax1.set_xlabel("Epochs")
@@ -156,6 +157,7 @@ if args.plot:
         ax1.plot(range(len(losses)),losses)
 
     if torch.numel(reshaped_test_data[0]) == 1:
+        # Sampling random trajectory and plotting it along with predicted trajectory
         fig2,ax2 = plt.subplots()
         sample = np.array(test_data[np.random.randint(0,len(test_data)-1)])
     
@@ -172,11 +174,21 @@ if args.plot:
         ax2.plot(sample[:-2,0], prediction[:-3] , label="prediction")
         ax2.legend()
 
-        #Plotting the dissipation potential
+        # Plotting dissipation potential
         fig3,ax3 = plt.subplots()
         ax3.set_xlabel("x*")
         ax3.set_ylabel("Ξ")
-        input = torch.tensor([x_star for x_star in np.linspace(-50,50,500)]).unsqueeze(0).T
-        ax3.plot(input,model.potential(input)[-500:].detach())
+        x_star_range = torch.linspace(-50,50,500)
+        ax3.plot(x_star_range, model.dissipation(x_star_range).detach())
+        ax3.set_title("Dissipation potential Ξ = Ξ(x*)")
 
+        # Plotting entropy
+        fig4,ax4 = plt.subplots()
+        ax4.set_xlabel("x")
+        ax4.set_ylabel("S")
+        x = torch.linspace(-50,50,500, dtype=torch.float64)
+        x = x.view(-1, DIMENSION)
+        ax4.plot(x, model.S(x).detach())
+        ax4.set_title("Entropy S = S(x)")
+        
     plt.show()

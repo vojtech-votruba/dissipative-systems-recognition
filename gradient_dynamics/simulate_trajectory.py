@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 """
     Code for generating simple trajectories in the spirit of gradient dynamics.
     Both the dissipation potential, and entropy used in this simulation are quadratic, resulting
-    in the equation of motion in the form \dot{x} = cx,
+    in the equation of motion in the form \dot{x} = \gamma*x which we solve with Euler's integration.
 """
 
 parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
