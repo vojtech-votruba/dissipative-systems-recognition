@@ -23,11 +23,13 @@ data = [
 data = np.array(data)
 input_data = data[:,1:-2,:]
 target = data[:,2:-1,:]
-train_data, test_data, train_target, test_target = train_test_split(input_data, target, test_size=0.2, random_state=42)
+train_data, test_data, train_target, test_target = train_test_split(
+    input_data, target, test_size=0.2, random_state=42)
+
 DIMENSION = int((len(train_data[0,0,:])-1)/2)
 
 """
-For neural networks which are not Hamiltonian based
+For neural networks that are modeling inertia
 
 reshaped_train_data = torch.tensor(train_data[:,:,1:].reshape((train_data[:,:,1:].shape[0] * train_data[:,:,1:].shape[1], train_data[:,:,1:].shape[2])))
 reshaped_train_target = torch.tensor(train_target[:,:,1:].reshape((train_target[:,:,1:].shape[0] * train_target[:,:,1:].shape[1], train_target[:,:,1:].shape[2])))
@@ -35,8 +37,11 @@ reshaped_test_data = torch.tensor(test_data[:,:,1:].reshape((test_data[:,:,1:].s
 reshaped_test_target = torch.tensor(test_target[:,:,1:].reshape((test_target[:,:,1:].shape[0] * test_target[:,:,1:].shape[1], test_target[:,:,1:].shape[2])))
 """
 
-reshaped_test_data = torch.tensor(test_data[:,:,1:DIMENSION+1].reshape((test_data[:,:,1:DIMENSION+1].shape[0] * test_data[:,:,1:DIMENSION+1].shape[1], test_data[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
-reshaped_test_target = torch.tensor(test_target[:,:,1:DIMENSION+1].reshape((test_target[:,:,1:DIMENSION+1].shape[0] * test_target[:,:,1:DIMENSION+1].shape[1], test_target[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
+reshaped_test_data = torch.tensor(test_data[:,:,1:DIMENSION+1].reshape(
+    (test_data[:,:,1:DIMENSION+1].shape[0] * test_data[:,:,1:DIMENSION+1].shape[1], test_data[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
+
+reshaped_test_target = torch.tensor(test_target[:,:,1:DIMENSION+1].reshape(
+    (test_target[:,:,1:DIMENSION+1].shape[0] * test_target[:,:,1:DIMENSION+1].shape[1], test_target[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
 
 # Adding some arguments
 parser = argparse.ArgumentParser(prog="learn_and_test.py",
@@ -58,40 +63,85 @@ DEVICE = (
 )
 
 torch.set_default_device(DEVICE)
-print(f"Using {DEVICE} for tensor calculation")
+print(f"Using {DEVICE} for tensor calculations")
 
 # Defining the neural network
 class EntropyNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         self.S = nn.Sequential(
-            nn.Linear(DIMENSION, 50).double(),
+            nn.Linear(DIMENSION, 20).double(),
             nn.Softplus(),
-            nn.Linear(50, 50).double(),
+            nn.Linear(20, 20).double(),
             nn.Softplus(),
-            nn.Linear(50, 50).double(),
+            nn.Linear(20, 20).double(),
             nn.Softplus(),
-            nn.Linear(50, 1).double()
+            nn.Linear(20, 1).double()
         )
 
     def forward(self, x):
         return self.S(x)
         
 class DissipationNetwork(nn.Module):
+    """
+        For dissipation potential network we are using a more complex architecture to ensure convexity of the output.
+        Specifically: PICNN, source: https://arxiv.org/pdf/1609.07152
+    """
     def __init__(self):
         super().__init__()
-        self.Xi = nn.Sequential(
-            nn.Linear(2*DIMENSION, 50).double(),
-            nn.Softplus(),
-            nn.Linear(50, 50).double(),
-            nn.Softplus(),
-            nn.Linear(50, 50).double(),
-            nn.Softplus(),
-            nn.Linear(50, 1).double()
-        )
+        # The branch that propagates x directly forward
+        self.x_input_layer = nn.Linear(DIMENSION, 20).double()
+        self.x_prop_layer1 = nn.Linear(20, 20).double()
+        self.x_prop_layer2 = nn.Linear(20, 20).double()
 
-    def forward(self, x):
-        return self.Xi(x)
+        # The branch that goes directly between x and x_star
+        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 20).double()
+        self.x_lateral_layer_2 = nn.Linear(20, 20).double()
+        self.x_lateral_layer_3 = nn.Linear(20, 20).double()
+        self.x_lateral_layer_out = nn.Linear(20, 1).double()
+
+        # The branch that propagates x_star forward (We need to enforce convexity here)
+        self.conjugate_prop_layer_1 = nn.Linear(20, 20, bias=False).double()
+        self.conjugate_prop_layer_2 = nn.Linear(20, 20, bias=False).double()
+        self.conjugate_prop_layer_out= nn.Linear(20, 1).double()
+
+        self.conjugate_prop_layer_1_mid = nn.Linear(20, 20, bias=False).double()
+        self.conjugate_prop_layer_2_mid = nn.Linear(20, 20, bias=False).double()
+        self.conjugate_prop_layer_out_mid = nn.Linear(20, 20, bias=False).double()
+
+        # The branch which always starts at x0_star and ends at arbitrary x_star
+        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 20).double()
+        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 20).double()
+        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 20).double()
+        self.conjugate_lateral_layer_out = nn.Linear(DIMENSION, 1).double()
+
+        self.conjugate_lateral_layer_in_mid = nn.Linear(DIMENSION, DIMENSION).double()
+        self.conjugate_lateral_layer_1_mid = nn.Linear(20, DIMENSION).double()
+        self.conjugate_lateral_layer_2_mid = nn.Linear(20, DIMENSION).double()
+        self.conjugate_lateral_layer_out_mid = nn.Linear(20, DIMENSION).double()
+
+    def forward(self, input):
+        x0 = input[:,:int(input.size(1)/2)]
+        x0_star = input[:,int(input.size(1)/2):]
+
+        x_star = nn.Softplus()(self.x_lateral_layer_1(x0) + self.conjugate_lateral_layer_in(torch.mul(x0_star, self.conjugate_lateral_layer_in_mid(x0))))
+        x = nn.Softplus()(self.x_input_layer(x0))
+
+        x_star = nn.Softplus()(self.x_lateral_layer_2(x) + self.conjugate_prop_layer_1(torch.mul(x_star, self.conjugate_prop_layer_1_mid(x)))
+                                + self.conjugate_lateral_layer_1(torch.mul(x0_star, self.conjugate_lateral_layer_1_mid(x))))
+        x = nn.Softplus()(self.x_prop_layer1(x))
+        self.conjugate_prop_layer_1.weight.data = torch.abs(self.conjugate_prop_layer_1.weight.data)
+
+        x_star = nn.Softplus()(self.x_lateral_layer_3(x) + self.conjugate_prop_layer_2(torch.mul(x_star, self.conjugate_prop_layer_2_mid(x)))
+                                + self.conjugate_lateral_layer_2(torch.mul(x0_star, self.conjugate_lateral_layer_2_mid(x))))
+        x = nn.Softplus()(self.x_prop_layer2(x))
+        self.conjugate_prop_layer_2.weight.data = torch.abs(self.conjugate_prop_layer_2.weight.data)
+
+        out = nn.Softplus()(self.x_lateral_layer_out(x) + self.conjugate_prop_layer_out(torch.mul(x_star, self.conjugate_prop_layer_out_mid(x)))\
+                                + self.conjugate_lateral_layer_out(torch.mul(x0_star, self.conjugate_lateral_layer_out_mid(x))))
+        self.conjugate_prop_layer_out.weight.data = torch.abs(self.conjugate_prop_layer_out.weight.data)
+
+        return out
 
 class GradientDynamics(nn.Module):
     def __init__(self):
@@ -117,8 +167,11 @@ class GradientDynamics(nn.Module):
 L = nn.MSELoss()
 
 if args.train:
-    reshaped_train_data = torch.tensor(train_data[:,:,1:DIMENSION+1].reshape((train_data[:,:,1:DIMENSION+1].shape[0] * train_data[:,:,1:DIMENSION+1].shape[1], train_data[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
-    reshaped_train_target = torch.tensor(train_target[:,:,1:DIMENSION+1].reshape((train_target[:,:,1:DIMENSION+1].shape[0] * train_target[:,:,1:DIMENSION+1].shape[1], train_target[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
+    reshaped_train_data = torch.tensor(train_data[:,:,1:DIMENSION+1].reshape(
+        (train_data[:,:,1:DIMENSION+1].shape[0] * train_data[:,:,1:DIMENSION+1].shape[1], train_data[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
+    
+    reshaped_train_target = torch.tensor(train_target[:,:,1:DIMENSION+1].reshape(
+        (train_target[:,:,1:DIMENSION+1].shape[0] * train_target[:,:,1:DIMENSION+1].shape[1], train_target[:,:,1:DIMENSION+1].shape[2])), requires_grad=True)
         
     model = GradientDynamics()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -178,7 +231,7 @@ if args.plot:
         fig3,ax3 = plt.subplots()
         ax3.set_xlabel("x*")
         ax3.set_ylabel("Ξ")
-        x_star_range = torch.linspace(-50,50,500)
+        x_star_range = torch.linspace(-50,50,200)
         ax3.plot(x_star_range, model.dissipation(x_star_range).detach())
         ax3.set_title("Dissipation potential Ξ = Ξ(x*)")
 
@@ -192,3 +245,4 @@ if args.plot:
         ax4.set_title("Entropy S = S(x)")
         
     plt.show()
+    
