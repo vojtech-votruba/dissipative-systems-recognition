@@ -63,7 +63,7 @@ if args.plot:
         random_trajectory = data[np.random.randint(0,args.num-1)]
         plt.plot(random_trajectory[:,0], random_trajectory[:,1])
         plt.show()
-
+        
     else:
         raise Exception("Plotting is not supported for more dimensions than 1.")
     

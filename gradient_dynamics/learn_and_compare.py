@@ -190,7 +190,7 @@ class GradientDynamics(nn.Module):
     def forward(self, x):
         S = self.S(x)
         x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0]
-        input = torch.cat((x,x_star), dim=1)
+        input = torch.stack((x,x_star), dim=1)
 
         Xi = self.Xi(input)
         x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
