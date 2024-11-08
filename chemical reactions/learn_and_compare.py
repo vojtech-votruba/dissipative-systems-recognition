@@ -95,15 +95,15 @@ class EntropyNetwork(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.input_layer = nn.Linear(DIMENSION, 20).double()
+        self.input_layer = nn.Linear(DIMENSION, 50).double()
 
-        self.prop_layer1 = nn.Linear(20, 20).double()
-        self.lateral_layer1 = nn.Linear(DIMENSION, 20).double()
+        self.prop_layer1 = nn.Linear(50, 50).double()
+        self.lateral_layer1 = nn.Linear(DIMENSION, 50).double()
 
-        self.prop_layer2 = nn.Linear(20, 20).double()
-        self.lateral_layer2 = nn.Linear(DIMENSION, 20).double()
+        self.prop_layer2 = nn.Linear(50, 50).double()
+        self.lateral_layer2 = nn.Linear(DIMENSION, 50).double()
 
-        self.output_layer = nn.Linear(20, 1).double()
+        self.output_layer = nn.Linear(50, 1).double()
         self.lateral_layer_out = nn.Linear(DIMENSION, 1).double()
 
     def forward(self, x0):
@@ -128,35 +128,35 @@ class DissipationNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         # The branch that propagates x directly forward
-        self.x_input_layer = nn.Linear(DIMENSION, 20).double()
-        self.x_prop_layer1 = nn.Linear(20, 20).double()
-        self.x_prop_layer2 = nn.Linear(20, 20).double()
+        self.x_input_layer = nn.Linear(DIMENSION, 50).double()
+        self.x_prop_layer1 = nn.Linear(50, 50).double()
+        self.x_prop_layer2 = nn.Linear(50, 50).double()
 
         # The branch that goes directly between x and x_star
-        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 20).double()
-        self.x_lateral_layer_2 = nn.Linear(20, 20).double()
-        self.x_lateral_layer_3 = nn.Linear(20, 20).double()
-        self.x_lateral_layer_out = nn.Linear(20, 1).double()
+        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 50).double()
+        self.x_lateral_layer_2 = nn.Linear(50, 50).double()
+        self.x_lateral_layer_3 = nn.Linear(50, 50).double()
+        self.x_lateral_layer_out = nn.Linear(50, 1).double()
 
         # The branch that propagates x_star forward (We need to enforce convexity here)
-        self.conjugate_prop_layer_1 = nn.Linear(20, 20, bias=False).double()
-        self.conjugate_prop_layer_2 = nn.Linear(20, 20, bias=False).double()
-        self.conjugate_prop_layer_out= nn.Linear(20, 1, bias=False).double()
+        self.conjugate_prop_layer_1 = nn.Linear(50, 50, bias=False).double()
+        self.conjugate_prop_layer_2 = nn.Linear(50, 50, bias=False).double()
+        self.conjugate_prop_layer_out= nn.Linear(50, 1, bias=False).double()
 
-        self.conjugate_prop_layer_1_mid = nn.Linear(20, 20).double()
-        self.conjugate_prop_layer_2_mid = nn.Linear(20, 20).double()
-        self.conjugate_prop_layer_out_mid = nn.Linear(20, 20).double()
+        self.conjugate_prop_layer_1_mid = nn.Linear(50, 50).double()
+        self.conjugate_prop_layer_2_mid = nn.Linear(50, 50).double()
+        self.conjugate_prop_layer_out_mid = nn.Linear(50, 50).double()
 
         # The branch which always starts at x0_star and ends at arbitrary x_star
-        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 20, bias=False).double()
-        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 20, bias=False).double()
-        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 20, bias=False).double()
+        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 50, bias=False).double()
+        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 50, bias=False).double()
+        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 50, bias=False).double()
         self.conjugate_lateral_layer_out = nn.Linear(DIMENSION, 1, bias=False).double()
 
         self.conjugate_lateral_layer_in_mid = nn.Linear(DIMENSION, DIMENSION).double()
-        self.conjugate_lateral_layer_1_mid = nn.Linear(20, DIMENSION).double()
-        self.conjugate_lateral_layer_2_mid = nn.Linear(20, DIMENSION).double()
-        self.conjugate_lateral_layer_out_mid = nn.Linear(20, DIMENSION).double()
+        self.conjugate_lateral_layer_1_mid = nn.Linear(50, DIMENSION).double()
+        self.conjugate_lateral_layer_2_mid = nn.Linear(50, DIMENSION).double()
+        self.conjugate_lateral_layer_out_mid = nn.Linear(50, DIMENSION).double()
 
     def forward(self, input):
         x0 = input[:,:int(input.size(1)/2)]
@@ -250,7 +250,7 @@ if args.plot:
     # Plotting the MSE decline
     if args.train:
         fig1,ax1 = plt.subplots()
-        ax1.set_xlabel("Epochs")
+        ax1.set_xlabel("Iterations")
         ax1.set_ylabel("MSE")
         ax1.set_title("training loss decline on the training data")
         ax1.plot(range(len(losses)), losses)
@@ -290,6 +290,81 @@ if args.plot:
         x = x.view(-1, DIMENSION)
         ax4.plot(x, model.S(x).detach())
         ax4.set_title("Entropy S = S(x)")
+
+    if DIMENSION == 2:
+        # Sampling random trajectory and plotting it along with predicted trajectory
+        fig2 = plt.figure()
+        ax2 = fig2.add_subplot(projection="3d")
+        sample = test_data[np.random.randint(0,len(test_data)-1)].detach().numpy()
+        time = [args.dt*i for i in range(len(sample))]
+    
+        ax2.set_xlabel("x1")
+        ax2.set_ylabel("x2")
+        ax2.set_xlim(0.0, 1.0)
+        ax2.set_ylim(0.0, 1.0)
+
+        ax2.set_zlabel("t")
+        ax2.plot(sample[:,0], sample[:,1], time, label="original data")
+
+        prediction = [sample[0]]
+        for i in range(len(sample)):
+            prediction.append(np.array(model(torch.tensor([prediction[i]], requires_grad=True))[1].detach())[0]*args.dt+prediction[i])
+
+        ax2.set_title(f"MSE of the test set: {MSE_test_set}")
+        prediction = np.array(prediction)
+
+        ax2.plot(prediction[:-3,0], prediction[:-3,1], time[:-2], label="prediction")
+        ax2.legend()
+
+        # Plotting dissipation potential
+        fig3 = plt.figure()
+        ax3 = fig3.add_subplot(projection="3d")
+        ax3.set_xlabel("x1*")
+        ax3.set_ylabel("x2*")
+        ax3.set_zlabel("Ξ")
+
+        x1_star = torch.linspace(0,1,500, dtype=torch.float64)
+        x2_star = torch.linspace(0,1,500, dtype=torch.float64)
+
+        X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
+        X1_star_flat = X1_star.flatten()
+        X2_star_flat = X2_star.flatten()
+        points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
+
+        Xi_flat = model.dissipation(points)
+        Xi = Xi_flat.reshape(X1_star.shape)
+
+        X1_star_np = X1_star.numpy()
+        X2_star_np = X2_star.numpy()
+        Xi_np = Xi.detach().numpy()
+
+        ax3.plot_surface(X1_star_np, X2_star_np, Xi_np)
+        ax3.set_title("Dissipation potential Ξ = Ξ(0, x*)")
+
+        # Plotting entropy
+        fig4 = plt.figure()
+        ax4 = fig4.add_subplot(projection="3d")
+        ax4.set_xlabel("x1")
+        ax4.set_ylabel("x2")
+        ax4.set_zlabel("S")
+
+        x1 = torch.linspace(0,1,500, dtype=torch.float64)
+        x2 = torch.linspace(0,1,500, dtype=torch.float64)
+
+        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
+        X1_flat = X1.flatten()
+        X2_flat = X2.flatten()
+        points = torch.stack([X1_flat, X2_flat], dim=1)
+
+        S_flat = model.S(points)
+        S = S_flat.reshape(X1.shape)
+
+        X1_np = X1.numpy()
+        X2_np = X2.numpy()
+        S_np = S.detach().numpy()
+
+        ax4.plot_surface(X1_np, X2_np, S_np)
+        ax4.set_title("Entropy S = S(x1, x2)")
         
     plt.show()
     
