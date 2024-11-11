@@ -300,10 +300,8 @@ if args.plot:
     
         ax2.set_xlabel("x1")
         ax2.set_ylabel("x2")
-        ax2.set_xlim(0.0, 1.0)
-        ax2.set_ylim(0.0, 1.0)
-
         ax2.set_zlabel("t")
+
         ax2.plot(sample[:,0], sample[:,1], time, label="original data")
 
         prediction = [sample[0]]
@@ -312,6 +310,8 @@ if args.plot:
 
         ax2.set_title(f"MSE of the test set: {MSE_test_set}")
         prediction = np.array(prediction)
+
+        breakpoint()
 
         ax2.plot(prediction[:-3,0], prediction[:-3,1], time[:-2], label="prediction")
         ax2.legend()
@@ -323,8 +323,8 @@ if args.plot:
         ax3.set_ylabel("x2*")
         ax3.set_zlabel("Ξ")
 
-        x1_star = torch.linspace(0,1,500, dtype=torch.float64)
-        x2_star = torch.linspace(0,1,500, dtype=torch.float64)
+        x1_star = torch.linspace(-200,200,1000, dtype=torch.float64)
+        x2_star = torch.linspace(-200,200,1000, dtype=torch.float64)
 
         X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
         X1_star_flat = X1_star.flatten()
@@ -348,8 +348,8 @@ if args.plot:
         ax4.set_ylabel("x2")
         ax4.set_zlabel("S")
 
-        x1 = torch.linspace(0,1,500, dtype=torch.float64)
-        x2 = torch.linspace(0,1,500, dtype=torch.float64)
+        x1 = torch.linspace(0,200,1000, dtype=torch.float64)
+        x2 = torch.linspace(0,200,1000, dtype=torch.float64)
 
         X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
         X1_flat = X1.flatten()

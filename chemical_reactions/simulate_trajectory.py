@@ -34,11 +34,11 @@ data = []
 
 for n in range(args.num):
     x = [0, 0]
-    x[0] = np.random.random()
-    x[1] = 1 - x[0]
+    x[0] = np.random.random()*5
+    x[1] = np.random.random()*5
     x = np.array(x)
 
-    x_dot = np.array([(0.5-np.random.random()) for i in range(DIM)])
+    x_dot = np.array([np.random.random() for i in range(DIM)])
     time = 0
     dataset = []
     for i in range(args.points):
