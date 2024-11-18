@@ -11,11 +11,12 @@ from matplotlib import pyplot as plt
 parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
                                 description='A short script for generating gradient dynamics data used in a machine learning project.',)
 
-parser.add_argument("--num" , default=100, type=int, help="number of trajectories that we want to simulate")
-parser.add_argument("--points", default=1000, type=int, help="number of points for each trajectory")
+parser.add_argument("--num" , default=50, type=int, help="number of trajectories that we want to simulate")
+parser.add_argument("--points", default=2000, type=int, help="number of points for each trajectory")
 parser.add_argument("--dt", default=0.02, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
+parser.add_argument("--gamma", default=400.0, type=float, help="the speed constant")
 args = parser.parse_args()
 
 DIM = 2
@@ -25,20 +26,19 @@ def evolution(x):
         and the dissipation potential to be in a form 1/sqrt(c1c2) cos((c1*-c2*) / 2)
     """
     R = 1
-    x_dot[0] = 1/4 * 1/np.sqrt(np.prod(x)) * ((x[1] / x[0])**(R/2) - (x[0] / x[1])**(R/2)) 
-    x_dot[1] = -1/4 * 1/np.sqrt(np.prod(x)) * ((x[1] / x[0])**(R/2) - (x[0] / x[1])**(R/2)) 
+    x_dot[0] = args.gamma*1/4 * 1/np.sqrt(np.prod(x)) * ((x[1] / x[0])**(R/2) - (x[0] / x[1])**(R/2)) 
+    x_dot[1] = -args.gamma*1/4 * 1/np.sqrt(np.prod(x)) * ((x[1] / x[0])**(R/2) - (x[0] / x[1])**(R/2)) 
 
     return x_dot
 
 data = []
 
-for n in range(args.num):
-    x = [0, 0]
-    x[0] = np.random.random()*5
-    x[1] = np.random.random()*5
-    x = np.array(x)
+np.random.seed(42)
 
-    x_dot = np.array([np.random.random() for i in range(DIM)])
+for n in range(args.num):
+    x = np.array([np.random.random()*1000, np.random.random()*1000], dtype=np.float32)
+    x_dot = np.array([np.random.random(),np.random.random()], dtype=np.float32)
+    
     time = 0
     dataset = []
     for i in range(args.points):
@@ -58,7 +58,7 @@ for n in range(args.num):
     data.append(dataset)
 
     if args.verbose:
-            print(f"{n}/{args.num}")
+            print(f"{n}/{args.num}", end='\r')
 
 if os.path.exists("data"):
     os.remove("data/dataset.txt")
@@ -83,6 +83,19 @@ if args.plot:
         random_trajectory = data[np.random.randint(0,args.num-1)]
         plt.plot(random_trajectory[:,0], random_trajectory[:,1])
         plt.show()
+
+    if DIM == 2:
+        fig = plt.figure()
+        ax = fig.add_subplot(projection="3d")
+        random_trajectory = data[np.random.randint(0,args.num-1)]
+
+        ax.set_xlabel("x1")
+        ax.set_ylabel("x2")
+        ax.set_zlabel("t")
+        ax.plot(random_trajectory[:,1], random_trajectory[:,2], random_trajectory[:,0], label="original data")
+
+        plt.show()
+
         
     else:
         raise Exception("Plotting is not supported for more dimensions than 1.")
