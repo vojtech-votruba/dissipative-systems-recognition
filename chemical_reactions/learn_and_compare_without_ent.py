@@ -73,10 +73,8 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
 
 parser.add_argument("--epochs", default=100, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=50, type=int, help="batch size for training of the model")
-parser.add_argument("--dt", default=0.02, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.01, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
-parser.add_argument('--entropy', default=False, action=argparse.BooleanOptionalAction, help="do you wish to train both the dissipation potential\
-                    and the entropy, or just the dissipation potential?")
 parser.add_argument('--plot', default=True, action=argparse.BooleanOptionalAction, help="option of plotting the loss function")
 args = parser.parse_args()
 
@@ -99,14 +97,6 @@ print(f"Using {DEVICE} for tensor calculations")
 if DEVICE == "cuda":
     print(f"CUDA version: {torch.version.cuda}")
 
-def x_star_analytically(x):
-    """
-    If we choose to train only the dissipation potential,
-    we want to calculate x*, i.e. x* = dS/dx analytically
-    """
-    R = 1
-    return -R * (torch.log(x) + 1)
-
 # Defining the neural network
 class EntropyNetwork(nn.Module):
     """
@@ -114,7 +104,6 @@ class EntropyNetwork(nn.Module):
         originally designed by myself - it's a simple alteration of FICNN - fully input convex neural nets,
         we just need to use concave, decreasing activation functions and negative weights instead of positive ones.
     """
-
     def __init__(self):
         super().__init__()
         self.input_layer = nn.Linear(DIMENSION, 50)
@@ -164,7 +153,6 @@ class DissipationNetwork(nn.Module):
         For the dissipation potential network we are using a more complex architecture to ensure convexity of the output.
         Specifically: PICNN, source: https://arxiv.org/pdf/1609.07152
     """
-
     def __init__(self):
         super().__init__()
         # The branch that propagates x directly forward
@@ -254,34 +242,19 @@ class DissipationNetwork(nn.Module):
 class GradientDynamics(nn.Module):
     def __init__(self):
         super().__init__()
-        if args.entropy:
-            self.S = EntropyNetwork()
-
+        self.S = EntropyNetwork()
         self.Xi = DissipationNetwork()
 
-    if args.entropy:
-        def forward(self, x):
-            x = x.float()
-            S = self.S(x)
-            x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0]
-            input = torch.stack((x,x_star), dim=1)
+    def forward(self, x):
+        x = x.float()
+        S = self.S(x)
+        x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0]
+        input = torch.stack((x,x_star), dim=1)
 
-            Xi = self.Xi(input)
-            x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
+        Xi = self.Xi(input)
+        x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
 
-            return [Xi,x_dot]
-        
-    else:
-        def forward(self, x):
-            x = x.float()
-            x_star = x_star_analytically(x)
-            input = torch.stack((x,x_star), dim=1)
-
-            Xi = self.Xi(input)
-            x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
-
-            return [Xi,x_dot]
-        
+        return [Xi,x_dot]
     
     def dissipation(self,x_star_tensor):
         x_star_tensor = x_star_tensor.float()
@@ -320,12 +293,13 @@ if args.train:
             predicted_velocity_rk = 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
             predicted_velocity = model(traj_batch_pos)[1]
-            
-            """if torch.norm(predicted_velocity_rk - predicted_velocity) < 1:
-                predicted_velocity = predicted_velocity_rk"""
 
-            loss = 0*L(predicted_velocity * args.dt + traj_batch_pos, traj_batch_pos_target) \
-                + 1*L(predicted_velocity, traj_batch_vel_target)
+            loss = L(predicted_velocity, traj_batch_vel_target)
+            
+            """if torch.norm(predicted_velocity_rk - predicted_velocity) < 0.8:
+                predicted_velocity = predicted_velocity_rk
+                loss += L(predicted_velocity * args.dt + traj_batch_pos, traj_batch_pos_target)"""
+
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
@@ -340,7 +314,6 @@ if args.train:
     else:
         os.mkdir("models")
         torch.save(model.state_dict(), "models/model.pth")
-
 else:
     model = GradientDynamics().to(DEVICE)
     model.load_state_dict(torch.load("models/model.pth", weights_only=True))
@@ -396,14 +369,13 @@ if args.plot:
         ax3.set_title("Dissipation potential Ξ = Ξ(x=0, x*)")
 
         # Plotting entropy
-        if args.entropy:
-            fig4,ax4 = plt.subplots()
-            ax4.set_xlabel("x")
-            ax4.set_ylabel("S")
-            x = torch.linspace(-50,50,500, dtype=torch.float32)
-            x = x.view(-1, DIMENSION)
-            ax4.plot(x, model.S(x).cpu().detach())
-            ax4.set_title("Entropy S = S(x)")
+        fig4,ax4 = plt.subplots()
+        ax4.set_xlabel("x")
+        ax4.set_ylabel("S")
+        x = torch.linspace(-50,50,500, dtype=torch.float32)
+        x = x.view(-1, DIMENSION)
+        ax4.plot(x, model.S(x).cpu().detach())
+        ax4.set_title("Entropy S = S(x)")
 
     if DIMENSION == 2:
         # Sampling random trajectory and plotting it along with predicted trajectory
@@ -455,30 +427,29 @@ if args.plot:
         ax3.set_title("Dissipation potential log(Ξ(1, x*))")
 
         # Plotting entropy
-        if args.entropy:
-            fig4 = plt.figure()
-            ax4 = fig4.add_subplot(projection="3d")
-            ax4.set_xlabel("x1")
-            ax4.set_ylabel("x2")
-            ax4.set_zlabel("S")
+        fig4 = plt.figure()
+        ax4 = fig4.add_subplot(projection="3d")
+        ax4.set_xlabel("x1")
+        ax4.set_ylabel("x2")
+        ax4.set_zlabel("S")
 
-            x1 = torch.linspace(0,2000,1000, dtype=torch.float32)
-            x2 = torch.linspace(0,2000,1000, dtype=torch.float32)
+        x1 = torch.linspace(0,2000,1000, dtype=torch.float32)
+        x2 = torch.linspace(0,2000,1000, dtype=torch.float32)
 
-            X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
-            X1_flat = X1.flatten()
-            X2_flat = X2.flatten()
-            points = torch.stack([X1_flat, X2_flat], dim=1)
+        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
+        X1_flat = X1.flatten()
+        X2_flat = X2.flatten()
+        points = torch.stack([X1_flat, X2_flat], dim=1)
 
-            S_flat = model.S(points)
-            S = S_flat.reshape(X1.shape)
+        S_flat = model.S(points)
+        S = S_flat.reshape(X1.shape)
 
-            X1_np = X1.cpu().numpy()
-            X2_np = X2.cpu().numpy()
-            S_np = S.cpu().detach().numpy()
+        X1_np = X1.cpu().numpy()
+        X2_np = X2.cpu().numpy()
+        S_np = S.cpu().detach().numpy()
 
-            ax4.plot_surface(X1_np, X2_np, S_np)
-            ax4.set_title("Entropy S = S(x1, x2)")
+        ax4.plot_surface(X1_np, X2_np, S_np)
+        ax4.set_title("Entropy S = S(x1, x2)")
         
     plt.show()
     
