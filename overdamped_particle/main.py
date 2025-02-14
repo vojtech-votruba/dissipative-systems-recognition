@@ -100,15 +100,15 @@ class EntropyNetwork(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.input_layer = nn.Linear(DIMENSION, 4)
+        self.input_layer = nn.Linear(DIMENSION, 8)
 
-        self.prop_layer1 = nn.Linear(4, 4)
-        self.lateral_layer1 = nn.Linear(DIMENSION, 4)
+        self.prop_layer1 = nn.Linear(8, 8)
+        self.lateral_layer1 = nn.Linear(DIMENSION, 8)
 
-        self.prop_layer2 = nn.Linear(4, 4)
-        self.lateral_layer2 = nn.Linear(DIMENSION, 4)
+        self.prop_layer2 = nn.Linear(8, 8)
+        self.lateral_layer2 = nn.Linear(DIMENSION, 8)
 
-        self.output_layer = nn.Linear(4, 1)
+        self.output_layer = nn.Linear(8, 1)
         self.lateral_layer_out = nn.Linear(DIMENSION, 1)
 
 
@@ -135,35 +135,35 @@ class DissipationNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         # The branch that propagates x directly forward
-        self.x_input_layer = nn.Linear(DIMENSION, 4)
-        self.x_prop_layer1 = nn.Linear(4, 4)
-        self.x_prop_layer2 = nn.Linear(4, 4)
+        self.x_input_layer = nn.Linear(DIMENSION, 8)
+        self.x_prop_layer1 = nn.Linear(8, 8)
+        self.x_prop_layer2 = nn.Linear(8, 8)
 
         # The branch that goes directly between x and x_star
-        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 4)
-        self.x_lateral_layer_2 = nn.Linear(4, 4)
-        self.x_lateral_layer_3 = nn.Linear(4, 4)
-        self.x_lateral_layer_out = nn.Linear(4, 1)
+        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 8)
+        self.x_lateral_layer_2 = nn.Linear(8, 8)
+        self.x_lateral_layer_3 = nn.Linear(8, 8)
+        self.x_lateral_layer_out = nn.Linear(8, 1)
 
         # The branch that propagates x_star forward (We need to enforce convexity here)
-        self.conjugate_prop_layer_1 = nn.Linear(4, 4, bias=False)
-        self.conjugate_prop_layer_2 = nn.Linear(4, 4, bias=False)
-        self.conjugate_prop_layer_out= nn.Linear(4, 1, bias=False)
+        self.conjugate_prop_layer_1 = nn.Linear(8, 8, bias=False)
+        self.conjugate_prop_layer_2 = nn.Linear(8, 8, bias=False)
+        self.conjugate_prop_layer_out= nn.Linear(8, 1, bias=False)
 
-        self.conjugate_prop_layer_1_mid = nn.Linear(4, 4)
-        self.conjugate_prop_layer_2_mid = nn.Linear(4, 4)
-        self.conjugate_prop_layer_out_mid = nn.Linear(4, 4)
+        self.conjugate_prop_layer_1_mid = nn.Linear(8, 8)
+        self.conjugate_prop_layer_2_mid = nn.Linear(8, 8)
+        self.conjugate_prop_layer_out_mid = nn.Linear(8, 8)
 
         # The branch which always starts at x0_star and ends at arbitrary x_star
-        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 4, bias=False)
-        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 4, bias=False)
-        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 4, bias=False)
+        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 8, bias=False)
+        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 8, bias=False)
+        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 8, bias=False)
         self.conjugate_lateral_layer_out = nn.Linear(DIMENSION, 1, bias=False)
 
         self.conjugate_lateral_layer_in_mid = nn.Linear(DIMENSION, DIMENSION)
-        self.conjugate_lateral_layer_1_mid = nn.Linear(4, DIMENSION)
-        self.conjugate_lateral_layer_2_mid = nn.Linear(4, DIMENSION)
-        self.conjugate_lateral_layer_out_mid = nn.Linear(4, DIMENSION)
+        self.conjugate_lateral_layer_1_mid = nn.Linear(8, DIMENSION)
+        self.conjugate_lateral_layer_2_mid = nn.Linear(8, DIMENSION)
+        self.conjugate_lateral_layer_out_mid = nn.Linear(8, DIMENSION)
 
     def forward(self, input, input_star):
         x0 = input
@@ -222,7 +222,7 @@ if args.train:
         should be the best for PINNs.
     """
     adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-3, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-2, max_iter=10, history_size=10, line_search_fn='strong_wolfe')
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=15, line_search_fn='strong_wolfe')
 
     # Training
     losses = []
@@ -236,20 +236,19 @@ if args.train:
             targ_pos = targ_pos.to(DEVICE)
             targ_veloc = targ_veloc.to(DEVICE)
 
+
             if i < args.epochs // 2:
+                """
+                    Firstly we try to find coarse convergence with Adam
+                """
+
                 optimizer = adam_optimizer
                 optimizer.zero_grad()
                 predicted_veloc = rk4(model, pos, args.dt)
                 trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
                 velocity_loss = L(predicted_veloc, veloc)
-                """
-                    While we could use a symplectic loss as it's accustomed when using HNNs,
-                    I found it more convinient to use energy conservation instead
-                """
-                conservation_loss = 0
-                zero_xi_loss = 0 
 
-                loss = trajectory_loss + velocity_loss + conservation_loss + zero_xi_loss
+                loss = trajectory_loss + velocity_loss
                 loss.backward()
                 optimizer.step()
             else:
@@ -260,10 +259,8 @@ if args.train:
                     predicted_veloc = rk4(model, pos, args.dt)
                     trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
                     velocity_loss = L(predicted_veloc, veloc)
-                    conservation_loss = 0
-                    zero_xi_loss = 0
 
-                    loss = trajectory_loss + velocity_loss + conservation_loss + zero_xi_loss
+                    loss = trajectory_loss + velocity_loss
                     loss.backward()
                     return loss
                 
@@ -384,7 +381,7 @@ if args.plot:
         fig6,ax6 = plt.subplots()
         ax6.set_xlabel("x*")
         ax6.set_ylabel("Ψ")
-        x_star_range = torch.linspace(-20,20,1000, dtype=torch.float32).reshape(-1,1)
+        x_star_range = torch.linspace(-10,10,1000, dtype=torch.float32).reshape(-1,1)
         zeros_column = torch.zeros_like(x_star_range, dtype=torch.float32).reshape(-1,1)
 
         ax6.plot(x_star_range, model.Psi(zeros_column, x_star_range).detach(), label="learned")
@@ -396,7 +393,7 @@ if args.plot:
         fig7,ax7 = plt.subplots()
         ax7.set_xlabel("x")
         ax7.set_ylabel("S")
-        x = torch.linspace(0.05,20,1000, dtype=torch.float32)
+        x = torch.linspace(0.05,10,1000, dtype=torch.float32)
         x = x.view(-1, DIMENSION)
         ax7.plot(x, model.S(x).detach(), label="learned")
         ax7.set_title("Entropy S = S(x)")
@@ -408,13 +405,14 @@ if args.plot:
         fig4 = plt.figure()
         ax4 = fig4.add_subplot(projection="3d")
         sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
-        time = [args.dt*i for i in range(len(sample))]
+        tensor_sample = torch.tensor([sample], requires_grad=True)
+        time_set = [args.dt*i for i in range(len(sample))]
 
         ax4.set_xlabel("x1")
         ax4.set_ylabel("x2")
         ax4.set_zlabel("t")
 
-        ax4.plot(sample[:,0], sample[:,1], time, label="original data")
+        ax4.plot(sample[:,0], sample[:,1], time_set, label="original data")
         velocities = model(torch.tensor([sample], requires_grad=True))
 
         prediction = [sample[0]]
@@ -425,17 +423,32 @@ if args.plot:
         ax4.set_title(f"MSE of the test set: {MSE_test_set}")
         prediction = np.array(prediction)
 
-        ax4.plot(prediction[:-3,0], prediction[:-3,1], time[:-2], label="prediction")
+        ax4.plot(prediction[:-3,0], prediction[:-3,1], time_set[:-2], label="prediction")
         ax4.legend()
 
-        # Plotting dissipation potential
-        fig5 = plt.figure()
-        ax5 = fig5.add_subplot(projection="3d")
-        ax5.set_xlabel("x1*")
-        ax5.set_ylabel("x2*")
+        # Plotting the dissipation potential, along our trajectory
+        fig5,ax5 = plt.subplots()
+        ax5.set_xlabel("t")
+        ax5.set_ylabel("Ψ")
 
-        x1_star = torch.linspace(-20,20,1000, dtype=torch.float32)
-        x2_star = torch.linspace(-20,20,1000, dtype=torch.float32)
+        S_sample = model.S(tensor_sample)
+        sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
+        potential_evolution = model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).detach().numpy()
+
+        ax5.plot(time_set, potential_evolution, label="learned")
+        ax5.plot(time_set, np.zeros_like(time_set), label="analytical")
+
+        ax5.set_title(f"The evolution of dissipation potential in time, along the given trajectory")
+        ax5.legend()
+
+        # Plotting dissipation potential
+        fig6 = plt.figure()
+        ax6 = fig6.add_subplot(projection="3d")
+        ax6.set_xlabel("x1*")
+        ax6.set_ylabel("x2*")
+
+        x1_star = torch.linspace(-10,10,1000, dtype=torch.float32)
+        x2_star = torch.linspace(-10,10,1000, dtype=torch.float32)
 
         X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
         X1_star_flat = X1_star.flatten()
@@ -450,22 +463,22 @@ if args.plot:
         X1_star_np = X1_star.cpu().numpy()
         X2_star_np = X2_star.cpu().numpy()
         Xi_np = Psi.cpu().detach().numpy()
-        ax5.set_title("Dissipation potential Ψ(1, x*)")
-        Xi_theor = 0.4 * (X1_star_np ** 2 + X2_star_np**2)
+        ax6.set_title("Dissipation potential Ψ(1, x*)")
+        Xi_theor = 0.5 * (X1_star_np ** 2 + X2_star_np**2)
 
-        ax5.plot_surface(X1_star_np, X2_star_np, Xi_np, label="learned")
-        ax5.plot_surface(X1_star_np, X2_star_np, Xi_theor , label="analytic")
-        ax5.legend() 
+        ax6.plot_surface(X1_star_np, X2_star_np, Xi_np, label="learned")
+        ax6.plot_surface(X1_star_np, X2_star_np, Xi_theor , label="analytic")
+        ax6.legend() 
 
         # Plotting entropy
-        fig6 = plt.figure()
-        ax6 = fig6.add_subplot(projection="3d")
-        ax6.set_xlabel("x1")
-        ax6.set_ylabel("x2")
-        ax6.set_zlabel("S")
+        fig7 = plt.figure()
+        ax7 = fig7.add_subplot(projection="3d")
+        ax7.set_xlabel("x1")
+        ax7.set_ylabel("x2")
+        ax7.set_zlabel("S")
 
-        x1 = torch.linspace(0.05,20,100, dtype=torch.float32)
-        x2 = torch.linspace(0.05,20,100, dtype=torch.float32)
+        x1 = torch.linspace(0.05,10,100, dtype=torch.float32)
+        x2 = torch.linspace(0.05,10,100, dtype=torch.float32)
 
         X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
         X1_flat = X1.flatten()
@@ -479,12 +492,12 @@ if args.plot:
         X2_np = X2.cpu().numpy()
         S_np = S.cpu().detach().numpy()
 
-        S_theor = (-1) * 0.4 * (X1_np **2 + X2_np**2)
+        S_theor = (-1) * 0.5 * (X1_np **2 + X2_np**2)
 
-        ax6.plot_surface(X1_np, X2_np, S_np, label="learned")
-        ax6.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
+        ax7.plot_surface(X1_np, X2_np, S_np, label="learned")
+        ax7.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
 
-        ax6.set_title("Entropy S = S(x1, x2)")
-        ax6.legend()
+        ax7.set_title("Entropy S = S(x1, x2)")
+        ax7.legend()
         
     plt.show()

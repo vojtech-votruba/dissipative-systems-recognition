@@ -44,8 +44,8 @@ data = []
 #np.random.seed(42)
 
 for n in range(args.num):
-    x = np.array([10*(0.5-np.random.random()) for i in range(args.dim)])
-    x_dot = np.array([10*(0.5-np.random.random()) for i in range(args.dim)])
+    x = np.array([50*(0.5-np.random.random()) for i in range(args.dim)])
+    x_dot = np.array([50*(0.5-np.random.random()) for i in range(args.dim)])
     time = 0
     dataset = []
     for i in range(args.points):
