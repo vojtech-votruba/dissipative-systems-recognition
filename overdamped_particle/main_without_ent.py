@@ -66,6 +66,7 @@ DEVICE = (
     else "cpu"
 )
 
+
 torch.set_default_device(DEVICE)
 print(f"Using {DEVICE} for tensor calculations")
 
@@ -89,39 +90,8 @@ def rk4(f, x, time_step):
 
     return 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
-class EntropyNetwork(nn.Module):
-    """
-        For the entropy network we are using a fully input concave neural network achitecture,
-        it's a simple alteration of FICNN - fully input convex neural nets,
-        we just need to use concave, decreasing activation functions and negative weights instead of positive ones.
-    """
-    def __init__(self):
-        super().__init__()
-        self.input_layer = nn.Linear(DIMENSION, 8)
-
-        self.prop_layer1 = nn.Linear(8, 8)
-        self.lateral_layer1 = nn.Linear(DIMENSION, 8)
-
-        self.prop_layer2 = nn.Linear(8, 8)
-        self.lateral_layer2 = nn.Linear(DIMENSION, 8)
-
-        self.output_layer = nn.Linear(8, 1)
-        self.lateral_layer_out = nn.Linear(DIMENSION, 1)
-
-
-    def forward(self, x0):
-        x = -nn.Softplus()(self.input_layer(x0))
-
-        x = -nn.Softplus()(self.prop_layer1(x) + self.lateral_layer1(x0))
-        self.prop_layer1.weight.data = -enforce_pos(self.prop_layer1.weight.data)
-
-        x = -nn.Softplus()(self.prop_layer2(x) + self.lateral_layer2(x0))
-        self.prop_layer2.weight.data = -enforce_pos(self.prop_layer2.weight.data)
-
-        S = -nn.Softplus()(self.output_layer(x) + self.lateral_layer_out(x0))
-        self.output_layer.weight.data = -enforce_pos(self.output_layer.weight.data)
-        
-        return S
+def conjugate(x):
+    return -1 * x
 
 class DissipationNetwork(nn.Module):
     """
@@ -170,6 +140,7 @@ class DissipationNetwork(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
+
     def forward(self, input, input_star):
         x0 = input
         x0_star = input_star
@@ -200,13 +171,11 @@ class DissipationNetwork(nn.Module):
 class GradientDynamics(nn.Module):
     def __init__(self):
         super().__init__()
-        self.S = EntropyNetwork()
         self.Psi = DissipationNetwork()
 
     def forward(self, x):
         x = x.float()
-        S = self.S(x)
-        x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0].float()
+        x_star = conjugate(x)
 
         Psi = self.Psi(x, x_star)
         x_dot = autograd.grad(Psi, x_star, grad_outputs=torch.ones_like(Psi), create_graph=True)[0]
@@ -254,7 +223,11 @@ if args.train:
                 loss = trajectory_loss + velocity_loss
                 loss.backward()
                 optimizer.step()
+                
             else:
+                """
+                    Then we switch to a more precise second order optimizer
+                """
                 optimizer = lbfgs_optimizer
                 
                 def closure():
@@ -262,7 +235,7 @@ if args.train:
                     predicted_veloc = rk4(model, pos, args.dt)
                     trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
                     velocity_loss = L(predicted_veloc, veloc)
-
+                    
                     loss = trajectory_loss + velocity_loss
                     loss.backward()
                     return loss
@@ -368,11 +341,10 @@ if args.plot:
         # Plotting the dissipation potential, along our trajectory
         fig5,ax5 = plt.subplots()
         ax5.set_xlabel("t")
-        ax5.set_ylabel("ln(Ψ)")
+        ax5.set_ylabel("Ψ")
 
-        S_sample = model.S(tensor_sample)
-        sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
-        potential_evolution = np.log(model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy())
+        sample_x_star = conjugate(tensor_sample)
+        potential_evolution = model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
 
         ax5.plot(time_set, potential_evolution, label="learned")
         ax5.plot(time_set, np.zeros_like(time_set), label="analytical")
@@ -391,17 +363,6 @@ if args.plot:
         ax6.set_title("Dissipation potential Ψ = Ψ(x=0, x*)")
         ax6.plot(x_star_range.cpu(), 1/2 * x_star_range.cpu()**2, label="analytic")
         ax6.legend()
-
-        # Plotting entropy
-        fig7,ax7 = plt.subplots()
-        ax7.set_xlabel("x")
-        ax7.set_ylabel("S")
-        x = torch.linspace(0.001,1,500, dtype=torch.float32)
-        x = x.view(-1, DIMENSION)
-        ax7.plot(x.cpu(), model.S(x).cpu().detach(), label="learned")
-        ax7.set_title("Entropy S = S(x)")
-        ax7.plot(x.cpu(), -1/2 * x.cpu()**2, label="analytic")
-        ax7.legend()
 
     if DIMENSION == 2:
         # Sampling random trajectory and plotting it along with predicted trajectory
@@ -434,8 +395,7 @@ if args.plot:
         ax5.set_xlabel("t")
         ax5.set_ylabel("ln(Ψ)")
 
-        S_sample = model.S(tensor_sample)
-        sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
+        sample_x_star = conjugate(tensor_sample)
         potential_evolution = np.log(model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy())
 
         ax5.plot(time_set, potential_evolution, label="learned")
@@ -472,35 +432,5 @@ if args.plot:
         ax6.plot_surface(X1_star_np, X2_star_np, Xi_np, label="learned")
         ax6.plot_surface(X1_star_np, X2_star_np, Xi_theor , label="analytic")
         ax6.legend() 
-
-        # Plotting entropy
-        fig7 = plt.figure()
-        ax7 = fig7.add_subplot(projection="3d")
-        ax7.set_xlabel("x1")
-        ax7.set_ylabel("x2")
-        ax7.set_zlabel("S")
-
-        x1 = torch.linspace(0.001,1,500, dtype=torch.float32)
-        x2 = torch.linspace(0.001,1,500, dtype=torch.float32)
-
-        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
-        X1_flat = X1.flatten()
-        X2_flat = X2.flatten()
-        points = torch.stack([X1_flat, X2_flat], dim=1)
-
-        S_flat = model.S(points)
-        S = S_flat.reshape(X1.shape)
-
-        X1_np = X1.cpu().numpy()
-        X2_np = X2.cpu().numpy()
-        S_np = S.cpu().detach().numpy()
-
-        S_theor = (-1) * 0.5 * (X1_np **2 + X2_np**2)
-
-        ax7.plot_surface(X1_np, X2_np, S_np, label="learned")
-        ax7.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
-
-        ax7.set_title("Entropy S = S(x1, x2)")
-        ax7.legend()
         
     plt.show()

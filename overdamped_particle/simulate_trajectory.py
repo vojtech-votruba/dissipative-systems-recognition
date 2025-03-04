@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import random
 import os
 from matplotlib import pyplot as plt
 
@@ -12,8 +13,8 @@ from matplotlib import pyplot as plt
 parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
                                 description='A short script for generating gradient dynamics data used in a machine learning project.',)
 
-parser.add_argument("--num" , default=100, type=int, help="number of trajectories that we want to simulate")
-parser.add_argument("--points", default=2000, type=int, help="number of points for each trajectory")
+parser.add_argument("--num" , default=150, type=int, help="number of trajectories that we want to simulate")
+parser.add_argument("--points", default=3000, type=int, help="number of points for each trajectory")
 parser.add_argument("--dim", default=1, type=int, help="dimension of the data")
 parser.add_argument("--dt", default=0.01, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
@@ -44,8 +45,8 @@ data = []
 #np.random.seed(42)
 
 for n in range(args.num):
-    x = np.array([50*(0.5-np.random.random()) for i in range(args.dim)])
-    x_dot = np.array([50*(0.5-np.random.random()) for i in range(args.dim)])
+    x = np.array([random.uniform(-1,1) for i in range(args.dim)])
+    x_dot = np.array([0 for i in range(args.dim)])
     time = 0
     dataset = []
     for i in range(args.points):
