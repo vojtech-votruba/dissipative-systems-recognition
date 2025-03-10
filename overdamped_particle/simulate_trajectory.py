@@ -13,10 +13,10 @@ from matplotlib import pyplot as plt
 parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
                                 description='A short script for generating gradient dynamics data used in a machine learning project.',)
 
-parser.add_argument("--num" , default=150, type=int, help="number of trajectories that we want to simulate")
-parser.add_argument("--points", default=3000, type=int, help="number of points for each trajectory")
+parser.add_argument("--num" , default=128, type=int, help="number of trajectories that we want to simulate")
+parser.add_argument("--points", default=4096, type=int, help="number of points for each trajectory")
 parser.add_argument("--dim", default=1, type=int, help="dimension of the data")
-parser.add_argument("--dt", default=0.01, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
 parser.add_argument("--gamma", default=-1.0, type=float, help="the dampening constant")
@@ -42,15 +42,17 @@ def rk4(f, x, time_step):
     return 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
 data = []
-#np.random.seed(42)
+np.random.seed(42)
 
 for n in range(args.num):
     x = np.array([random.uniform(-1,1) for i in range(args.dim)])
     x_dot = np.array([0 for i in range(args.dim)])
+    
     time = 0
     dataset = []
     for i in range(args.points):
         dataset.append([time] + [each for each in x] + [each for each in x_dot])
+
         x_dot = rk4(evolution, x, args.dt)
         x += x_dot * args.dt
         time += args.dt
@@ -78,6 +80,13 @@ if args.verbose:
     print("\nDone! Trajectories saved into ./data/dataset.txt")
 
 if args.plot:
+    plt.style.use("bmh")
+    custom_cycler = plt.cycler(
+        color=['#6c3b9c', '#a02c2c', '#2c7a2c', '#2c2c7a', '#287d7d', '#aa5500', '#555555'],
+        linestyle=['-', '--', '-.', ':', (0, (3, 1, 1, 1)), (0, (5, 2)), (0, (1, 1))]
+    )
+    plt.rc('axes', prop_cycle=custom_cycler)
+    
     if args.dim == 1:
         plt.xlabel("t")
         plt.ylabel("x")
@@ -94,9 +103,8 @@ if args.plot:
         ax.set_ylabel("x2")
         ax.set_zlabel("t")
         ax.plot(random_trajectory[:,1], random_trajectory[:,2], random_trajectory[:,0], label="original data")
-
         plt.show()
         
     else:
-        raise Exception("Plotting is not supported for more dimensions than 1.")
+        raise Exception("Plotting is not supported for more dimensions than 1 and 2.")
     

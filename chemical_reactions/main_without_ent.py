@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
                                  description="A pytorch code for learning and testing state space\
                                  trajectory prediciton.")
 
-parser.add_argument("--epochs", default=800, type=int, help="number of epoches for the model to train")
+parser.add_argument("--epochs", default=300, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
 parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
@@ -59,6 +59,32 @@ class TrajectoryDataset(Dataset):
 
 trajectories = TrajectoryDataset()
 
+"""
+    Plotting one of the trajectories to check if it has loaded correctely,
+    and if it's numerically integrable by Euler's method with the chosen timestep
+
+fig = plt.figure()
+ax = fig.add_subplot(projection="3d")
+
+rand = np.random.randint(0,trajectories.__len__()-1)
+random_trajectory = trajectories.position[rand].detach().numpy()
+random_velocities = trajectories.velocity[rand].detach().numpy()
+
+prediction = [random_trajectory[0]]
+for v in random_velocities:
+    prediction.append(prediction[-1] + v*args.dt)
+
+times = [n*args.dt for n in range(len(random_trajectory))]
+
+ax.set_xlabel("x1")
+ax.set_ylabel("x2")
+ax.set_zlabel("t")
+ax.plot(random_trajectory[:,0], random_trajectory[:,1], times, label="original data")
+ax.plot(random_trajectory[:,0], random_trajectory[:,1], times, label="numerical integration data")
+
+plt.show()
+"""
+
 DEVICE = (
     "cuda"
     if torch.cuda.is_available()
@@ -100,7 +126,7 @@ def rk4(f, x, time_step):
     return 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
 def conjugate(x):
-    return -1 * x
+    return -torch.log(x)
 
 class DissipationNetwork(nn.Module):
     """
@@ -197,7 +223,7 @@ if args.train:
     model = GradientDynamics().to(DEVICE)
 
     adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=12, line_search_fn='strong_wolfe')
 
     # Training
     trajectory_losses = []
@@ -218,7 +244,7 @@ if args.train:
             targ_pos = targ_pos.to(DEVICE)
             targ_veloc = targ_veloc.to(DEVICE)
 
-            if i < args.epochs // 1.1:
+            if i < args.epochs // 2:
                 optimizer = adam_optimizer
                 optimizer.zero_grad()
 
@@ -255,7 +281,7 @@ if args.train:
                         loss_scales["minimum"] = alpha * loss_scales["minimum"] + (1 - alpha) * (minimum_loss.item() + epsilon)
 
                 loss = (
-                    0.1 * trajectory_loss / loss_scales["trajectory"] +
+                    0.05 * trajectory_loss / loss_scales["trajectory"] +
                     0.6 * velocity_loss / loss_scales["velocity"] +
                     0.1 * conservation_loss / loss_scales["conservation"] +
                     0.1 * origin_loss / loss_scales["origin"] + 
@@ -390,80 +416,6 @@ if args.plot:
 
         ax0.legend()
 
-    if DIMENSION == 1:
-        # Sampling random trajectory and plotting it along with predicted trajectory
-        fig1,ax1 = plt.subplots()
-        sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
-        tensor_sample = torch.tensor([sample], requires_grad=True)
-        time_set = [args.dt*i for i in range(len(sample))]
-    
-        ax1.set_xlabel("t")
-        ax1.set_ylabel("x")
-        
-        velocities = rk4(model, tensor_sample, args.dt)
-
-        prediction = [sample[0]]
-        for i in range(len(sample)):
-            prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
-
-        prediction = np.array(prediction)
-        ax1.set_title(f"Total MSE of the test set: {MSE_test_set}")
-
-        ax1.plot(time_set[:-2], prediction[:-3] , label="prediction")
-        ax1.plot(time_set, sample, label="original data")
-        ax1.legend()
-
-        # Plotting the dissipation potential, along our trajectory
-        fig2,ax2 = plt.subplots()
-        ax2.set_xlabel("t")
-        ax2.set_ylabel("Ψ")
-
-        sample_x_star = conjugate(tensor_sample)
-        potential_evolution = model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
-
-        ax2.plot(time_set, potential_evolution, label="learned")
-        ax2.set_title(f"Dissipation potential in time, along the given trajectory")
-        ax2.legend()
-
-        # Plotting the learned dissipation potential
-        fig3,ax3 = plt.subplots()
-        ax3.set_xlabel("x*")
-        ax3.set_ylabel("Ψ")
-        ax3.set_title("Dissipation potential Ψ = Ψ(x=0, x*)")
-
-        x_star_range = torch.linspace(-1,1,500, dtype=torch.float32).reshape(-1,1)
-        zeros_column = torch.zeros_like(x_star_range, dtype=torch.float32).reshape(-1,1)
-
-        ax3.plot(x_star_range.cpu(), model.Psi(zeros_column, x_star_range).cpu().detach(), label="learned")
-        ax3.plot(x_star_range.cpu(), 1/2 * x_star_range.cpu()**2, label="analytic")
-        ax3.legend()
-
-#-------------------------------------------------------------------------------------------------------------------------------------
-
-        fig5 = plt.figure()
-        ax5 = fig5.add_subplot(projection="3d")
-        ax5.set_xlabel("x")
-        ax5.set_ylabel("x*")
-
-        x_range = torch.linspace(-1, 1, 500, dtype=torch.float32).reshape(-1, 1)
-        x_star_range = torch.linspace(-1, 1, 500, dtype=torch.float32).reshape(-1, 1)
-        X, X_star = torch.meshgrid(x_range.squeeze(), x_star_range.squeeze(), indexing="ij")
-        X_flat = X.flatten().reshape(-1, 1)
-        X_star_flat = X_star.flatten().reshape(-1, 1)
-
-        Psi_flat = model.Psi(X_flat, X_star_flat)
-        Psi = Psi_flat.reshape(X.shape)
-
-        X1_star_np = X.cpu().numpy()
-        X2_star_np = X_star.cpu().numpy()
-        Psi_np = Psi.cpu().detach().numpy()
-
-        ax5.set_title("Dissipation potential Ψ(x, x*)")
-        ax5.plot_surface(X1_star_np, X2_star_np, Psi_np)
-
-#-------------------------------------------------------------------------------------------------------------------------------------
-
-    if DIMENSION == 2:
         # Sampling random trajectory and plotting it along with predicted trajectory
         fig1 = plt.figure()
         ax1 = fig1.add_subplot(projection="3d")
@@ -516,7 +468,7 @@ if args.plot:
         X2_star_flat = X2_star.flatten()
         points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
 
-        zeros_column = torch.zeros_like(points, dtype=torch.float32)
+        zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
 
         Psi_flat = model.Psi(zeros_column, points)
         Psi = Psi_flat.reshape(X1_star.shape)
@@ -524,8 +476,8 @@ if args.plot:
         X1_star_np = X1_star.cpu().numpy()
         X2_star_np = X2_star.cpu().numpy()
         Psi_np = Psi.cpu().detach().numpy()
-        ax3.set_title("Dissipation potential Ψ(0, x*)")
-        Psi_theor = 0.5 * (X1_star_np ** 2 + X2_star_np**2)
+        ax3.set_title("Dissipation potential Ψ(0.2, x*)")
+        Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2)
 
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")

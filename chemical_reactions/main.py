@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
                                  description="A pytorch code for learning and testing state space\
                                  trajectory prediciton.")
 
-parser.add_argument("--epochs", default=800, type=int, help="number of epoches for the model to train")
+parser.add_argument("--epochs", default=300, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
 parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
@@ -59,6 +59,32 @@ class TrajectoryDataset(Dataset):
 
 trajectories = TrajectoryDataset()
 
+"""
+    Plotting one of the trajectories to check if it has loaded correctely,
+    and if it's numerically integrable by Euler's method with the chosen timestep
+
+fig = plt.figure()
+ax = fig.add_subplot(projection="3d")
+
+rand = np.random.randint(0,trajectories.__len__()-1)
+random_trajectory = trajectories.position[rand].detach().numpy()
+random_velocities = trajectories.velocity[rand].detach().numpy()
+
+prediction = [random_trajectory[0]]
+for v in random_velocities:
+    prediction.append(prediction[-1] + v*args.dt)
+
+times = [n*args.dt for n in range(len(random_trajectory))]
+
+ax.set_xlabel("x1")
+ax.set_ylabel("x2")
+ax.set_zlabel("t")
+ax.plot(random_trajectory[:,0], random_trajectory[:,1], times, label="original data")
+ax.plot(random_trajectory[:,0], random_trajectory[:,1], times, label="numerical integration data")
+
+plt.show()
+"""
+
 DEVICE = (
     "cuda"
     if torch.cuda.is_available()
@@ -88,6 +114,21 @@ class PositiveLinear(nn.Linear):
 
         return nn.functional.linear(input, reparam_W, self.bias)
 
+class NegativeLinear(nn.Linear):
+    """
+        A positive layer that we use to enforce convexity
+    """
+
+    def forward(self, input):
+        W = self.weight
+        eps_tensor = torch.tensor(args.eps, device=W.device, dtype=W.dtype)
+
+        positive_W = -torch.exp(-W - eps_tensor) 
+        negative_W = W - torch.exp(-eps_tensor)
+        reparam_W = torch.where(W >= 0, positive_W, negative_W) 
+
+        return nn.functional.linear(input, reparam_W, self.bias)
+
 def rk4(f, x, time_step):
     """
         Classical 4th order Runge Kutta implementation
@@ -99,8 +140,45 @@ def rk4(f, x, time_step):
 
     return 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
-def conjugate(x):
-    return -1 * x
+class EntropyNetwork(nn.Module):
+    """
+        For the entropy network we are using a fully input concave neural network achitecture,
+        it's a simple alteration of FICNN - fully input convex neural nets,
+        we just need to use concave, decreasing activation functions and negative weights instead of positive ones.
+    """
+    def __init__(self):
+        super().__init__()
+        self.input_layer = nn.Linear(DIMENSION, 3)
+
+        self.prop_layer1 = NegativeLinear(3, 3)
+        self.lateral_layer1 = nn.Linear(DIMENSION, 3)
+
+        self.prop_layer2 = NegativeLinear(3, 3)
+        self.lateral_layer2 = nn.Linear(DIMENSION, 3)
+
+        self.output_layer = NegativeLinear(3, 1)
+        self.lateral_layer_out = nn.Linear(DIMENSION, 1)
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.kaiming_normal_(module.weight, generator=generator)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+
+    def forward(self, x0):
+        x = -nn.Softplus()(self.input_layer(x0))
+
+        x = -nn.Softplus()(self.prop_layer1(x) + self.lateral_layer1(x0))
+
+        x = -nn.Softplus()(self.prop_layer2(x) + self.lateral_layer2(x0))
+
+        S = -nn.Softplus()(self.output_layer(x) + self.lateral_layer_out(x0))
+
+        return S
 
 class DissipationNetwork(nn.Module):
     """
@@ -177,11 +255,13 @@ class DissipationNetwork(nn.Module):
 class GradientDynamics(nn.Module):
     def __init__(self):
         super().__init__()
+        self.S = EntropyNetwork()
         self.Psi = DissipationNetwork()
 
     def forward(self, x):
         x = x.float()
-        x_star = conjugate(x)
+        S = self.S(x)
+        x_star = autograd.grad(S, x, grad_outputs=torch.ones_like(S), create_graph=True)[0].float()
 
         Psi = self.Psi(x, x_star)
         x_dot = autograd.grad(Psi, x_star, grad_outputs=torch.ones_like(Psi), create_graph=True)[0]
@@ -197,7 +277,7 @@ if args.train:
     model = GradientDynamics().to(DEVICE)
 
     adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=12, line_search_fn='strong_wolfe')
 
     # Training
     trajectory_losses = []
@@ -218,18 +298,25 @@ if args.train:
             targ_pos = targ_pos.to(DEVICE)
             targ_veloc = targ_veloc.to(DEVICE)
 
-            if i < args.epochs // 1.1:
+            if i < args.epochs // 2:
                 optimizer = adam_optimizer
                 optimizer.zero_grad()
 
                 predicted_veloc = rk4(model, pos, args.dt)
                 trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
                 velocity_loss = L(predicted_veloc, veloc)
-                pos_star = conjugate(pos)
+                S = model.S(pos)
+                pos_star = autograd.grad(S, pos, grad_outputs=torch.ones_like(S), create_graph=True)[0].float()
 
                 Psi_array = model.Psi(pos, pos_star)
                 dPsi = Psi_array[:, 1:, :] - Psi_array[:, :-1, :]
                 conservation_loss = L(dPsi, torch.zeros_like(dPsi))
+
+                dPsi_dx = autograd.grad(Psi_array, pos, grad_outputs=torch.ones_like(Psi_array), create_graph=True)[0]
+                dPsi_dx_star = autograd.grad(Psi_array, pos_star, grad_outputs=torch.ones_like(Psi_array), create_graph=True)[0]
+                dPsi_dx_star_dx = autograd.grad(dPsi_dx, pos_star, grad_outputs=torch.ones_like(dPsi_dx), create_graph=True)[0]
+                dPsi_dx_dx_star = autograd.grad(dPsi_dx_star, pos, grad_outputs=torch.ones_like(dPsi_dx_star), create_graph=True)[0]
+                integrability_loss = L(dPsi_dx_star_dx, dPsi_dx_dx_star)
 
                 Psi_origin_array = model.Psi(pos, torch.zeros_like(pos))
                 origin_loss = L(Psi_origin_array, torch.zeros_like(Psi_origin_array))
@@ -243,6 +330,7 @@ if args.train:
                         "trajectory": trajectory_loss.item() + epsilon,
                         "velocity": velocity_loss.item() + epsilon,
                         "conservation": conservation_loss.item() + epsilon,
+                        "integrability": integrability_loss.item() + epsilon,
                         "origin": origin_loss.item() + epsilon,
                         "minimum": minimum_loss.item() + epsilon,
                     }
@@ -251,15 +339,17 @@ if args.train:
                         loss_scales["trajectory"] = alpha * loss_scales["trajectory"] + (1 - alpha) * (trajectory_loss.item() + epsilon)
                         loss_scales["velocity"] = alpha * loss_scales["velocity"] + (1 - alpha) * (velocity_loss.item() + epsilon)
                         loss_scales["conservation"] = alpha * loss_scales["conservation"] + (1 - alpha) * (conservation_loss.item() + epsilon)
+                        loss_scales["integrability"] = alpha * loss_scales["integrability"] + (1 - alpha) * (integrability_loss.item() + epsilon)
                         loss_scales["origin"] = alpha * loss_scales["origin"] + (1 - alpha) * (origin_loss.item() + epsilon)
                         loss_scales["minimum"] = alpha * loss_scales["minimum"] + (1 - alpha) * (minimum_loss.item() + epsilon)
 
                 loss = (
-                    0.1 * trajectory_loss / loss_scales["trajectory"] +
+                    0.05 * trajectory_loss / loss_scales["trajectory"] +
                     0.6 * velocity_loss / loss_scales["velocity"] +
                     0.1 * conservation_loss / loss_scales["conservation"] +
-                    0.1 * origin_loss / loss_scales["origin"] + 
-                    0.1 * minimum_loss / loss_scales["minimum"]
+                    #0.1 * origin_loss / loss_scales["origin"] + 
+                    #0.1 * minimum_loss / loss_scales["minimum"] +
+                    0.05 * integrability_loss / loss_scales["integrability"]
                 )
                 loss.backward()
 
@@ -274,11 +364,18 @@ if args.train:
                     predicted_veloc = rk4(model, pos, args.dt)
                     trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
                     velocity_loss = L(predicted_veloc, veloc)
-                    pos_star = conjugate(pos)
 
+                    S = model.S(pos)
+                    pos_star = autograd.grad(S, pos, grad_outputs=torch.ones_like(S), create_graph=True)[0].float()
                     Psi_array = model.Psi(pos, pos_star)
                     dPsi = Psi_array[:, 1:, :] - Psi_array[:, :-1, :]
                     conservation_loss = L(dPsi, torch.zeros_like(dPsi))
+
+                    dPsi_dx = autograd.grad(Psi_array, pos, grad_outputs=torch.ones_like(Psi_array), create_graph=True, retain_graph=True)[0]
+                    dPsi_dx_star = autograd.grad(Psi_array, pos_star, grad_outputs=torch.ones_like(Psi_array), create_graph=True, retain_graph=True)[0]
+                    dPsi_dx_star_dx = autograd.grad(dPsi_dx, pos_star, grad_outputs=torch.ones_like(dPsi_dx), create_graph=True, retain_graph=True)[0]
+                    dPsi_dx_dx_star = autograd.grad(dPsi_dx_star, pos, grad_outputs=torch.ones_like(dPsi_dx_star), create_graph=True, retain_graph=True)[0]
+                    integrability_loss = L(dPsi_dx_star_dx, dPsi_dx_dx_star)
 
                     Psi_origin_array = model.Psi(pos, torch.zeros_like(pos))
                     origin_loss = L(Psi_origin_array, torch.zeros_like(Psi_origin_array))
@@ -288,11 +385,12 @@ if args.train:
                     minimum_loss = L(dPsi_dx_star_zero, torch.zeros_like(dPsi_dx_star_zero))
 
                     loss = (
-                        0.1 * trajectory_loss / loss_scales["trajectory"] +
+                        0.05 * trajectory_loss / loss_scales["trajectory"] +
                         0.6 * velocity_loss / loss_scales["velocity"] +
                         0.1 * conservation_loss / loss_scales["conservation"] +
-                        0.1 * origin_loss / loss_scales["origin"] + 
-                        0.1 * minimum_loss / loss_scales["minimum"]
+                        #0.1 * origin_loss / loss_scales["origin"] + 
+                        #0.1 * minimum_loss / loss_scales["minimum"] +
+                        0.05 * integrability_loss / loss_scales["integrability"]
                     )
                     loss.backward()
                     
@@ -303,7 +401,8 @@ if args.train:
             predicted_veloc = rk4(model, pos, args.dt)
             trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos)
             velocity_loss = L(predicted_veloc, veloc)
-            pos_star = conjugate(pos)
+            S = model.S(pos)
+            pos_star = autograd.grad(S, pos, grad_outputs=torch.ones_like(S), create_graph=True)[0].float()
 
             Psi_array = model.Psi(pos, pos_star)
             dPsi = Psi_array[:, 1:, :] - Psi_array[:, :-1, :]
@@ -336,7 +435,8 @@ if args.train:
                 origin_losses.append(origin_loss.item())
                 minimum_losses.append(minimum_loss.item())
 
-        print(f"Epoch no. {i}/{args.epochs} done! Traj. loss: {trajectory_loss}. Vel. loss: {velocity_loss}. Cons. loss: {conservation_loss}. Orig. loss: {conservation_loss}. Min. loss: {minimum_loss}")
+        print(f"""Epoch no. {i}/{args.epochs} done! Traj. loss: {trajectory_loss}. Vel. loss: {velocity_loss}. Cons. loss: {conservation_loss}. 
+              Integ. loss: {integrability_loss} Orig. loss: {conservation_loss}. Min. loss: {minimum_loss}""")
 
     if os.path.exists("models"):
         torch.save(model.state_dict(), "models/model.pth")
@@ -385,85 +485,12 @@ if args.plot:
         ax0.plot(range(len(trajectory_losses)), trajectory_losses, label="trajectory loss")
         ax0.plot(range(len(velocity_losses)), velocity_losses, label="velocity loss")
         ax0.plot(range(len(conservation_losses)), conservation_losses, label="conservation loss")
+        ax0.plot(range(len(integrability_losses)), integrability_losses, label="integrability loss")
         ax0.plot(range(len(origin_losses)), origin_losses, label="origin loss")
         ax0.plot(range(len(minimum_losses)), minimum_losses, label="minimum loss")
 
         ax0.legend()
 
-    if DIMENSION == 1:
-        # Sampling random trajectory and plotting it along with predicted trajectory
-        fig1,ax1 = plt.subplots()
-        sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
-        tensor_sample = torch.tensor([sample], requires_grad=True)
-        time_set = [args.dt*i for i in range(len(sample))]
-    
-        ax1.set_xlabel("t")
-        ax1.set_ylabel("x")
-        
-        velocities = rk4(model, tensor_sample, args.dt)
-
-        prediction = [sample[0]]
-        for i in range(len(sample)):
-            prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
-
-        prediction = np.array(prediction)
-        ax1.set_title(f"Total MSE of the test set: {MSE_test_set}")
-
-        ax1.plot(time_set[:-2], prediction[:-3] , label="prediction")
-        ax1.plot(time_set, sample, label="original data")
-        ax1.legend()
-
-        # Plotting the dissipation potential, along our trajectory
-        fig2,ax2 = plt.subplots()
-        ax2.set_xlabel("t")
-        ax2.set_ylabel("Ψ")
-
-        sample_x_star = conjugate(tensor_sample)
-        potential_evolution = model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
-
-        ax2.plot(time_set, potential_evolution, label="learned")
-        ax2.set_title(f"Dissipation potential in time, along the given trajectory")
-        ax2.legend()
-
-        # Plotting the learned dissipation potential
-        fig3,ax3 = plt.subplots()
-        ax3.set_xlabel("x*")
-        ax3.set_ylabel("Ψ")
-        ax3.set_title("Dissipation potential Ψ = Ψ(x=0, x*)")
-
-        x_star_range = torch.linspace(-1,1,500, dtype=torch.float32).reshape(-1,1)
-        zeros_column = torch.zeros_like(x_star_range, dtype=torch.float32).reshape(-1,1)
-
-        ax3.plot(x_star_range.cpu(), model.Psi(zeros_column, x_star_range).cpu().detach(), label="learned")
-        ax3.plot(x_star_range.cpu(), 1/2 * x_star_range.cpu()**2, label="analytic")
-        ax3.legend()
-
-#-------------------------------------------------------------------------------------------------------------------------------------
-
-        fig5 = plt.figure()
-        ax5 = fig5.add_subplot(projection="3d")
-        ax5.set_xlabel("x")
-        ax5.set_ylabel("x*")
-
-        x_range = torch.linspace(-1, 1, 500, dtype=torch.float32).reshape(-1, 1)
-        x_star_range = torch.linspace(-1, 1, 500, dtype=torch.float32).reshape(-1, 1)
-        X, X_star = torch.meshgrid(x_range.squeeze(), x_star_range.squeeze(), indexing="ij")
-        X_flat = X.flatten().reshape(-1, 1)
-        X_star_flat = X_star.flatten().reshape(-1, 1)
-
-        Psi_flat = model.Psi(X_flat, X_star_flat)
-        Psi = Psi_flat.reshape(X.shape)
-
-        X1_star_np = X.cpu().numpy()
-        X2_star_np = X_star.cpu().numpy()
-        Psi_np = Psi.cpu().detach().numpy()
-
-        ax5.set_title("Dissipation potential Ψ(x, x*)")
-        ax5.plot_surface(X1_star_np, X2_star_np, Psi_np)
-
-#-------------------------------------------------------------------------------------------------------------------------------------
-
-    if DIMENSION == 2:
         # Sampling random trajectory and plotting it along with predicted trajectory
         fig1 = plt.figure()
         ax1 = fig1.add_subplot(projection="3d")
@@ -494,7 +521,8 @@ if args.plot:
         ax2.set_xlabel("t")
         ax2.set_ylabel("Ψ")
 
-        sample_x_star = conjugate(tensor_sample)
+        S_sample = model.S(tensor_sample)
+        sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
         potential_evolution = model.Psi(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
 
         ax2.plot(time_set, potential_evolution, label="learned")
@@ -516,7 +544,7 @@ if args.plot:
         X2_star_flat = X2_star.flatten()
         points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
 
-        zeros_column = torch.zeros_like(points, dtype=torch.float32)
+        zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
 
         Psi_flat = model.Psi(zeros_column, points)
         Psi = Psi_flat.reshape(X1_star.shape)
@@ -524,11 +552,43 @@ if args.plot:
         X1_star_np = X1_star.cpu().numpy()
         X2_star_np = X2_star.cpu().numpy()
         Psi_np = Psi.cpu().detach().numpy()
-        ax3.set_title("Dissipation potential Ψ(0, x*)")
-        Psi_theor = 0.5 * (X1_star_np ** 2 + X2_star_np**2)
+        ax3.set_title("Dissipation potential Ψ(0.2, x*)")
+        Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2)
 
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
         ax3.legend()
 
+        # Plotting entropy
+        fig4 = plt.figure()
+        ax4 = fig4.add_subplot(projection="3d")
+        ax4.set_xlabel("x1")
+        ax4.set_ylabel("x2")
+        ax4.set_zlabel("S")
+
+        x1 = torch.linspace(0.001,1,500, dtype=torch.float32)
+        x2 = torch.linspace(0.001,1,500, dtype=torch.float32)
+
+        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
+        X1_flat = X1.flatten()
+        X2_flat = X2.flatten()
+        points = torch.stack([X1_flat, X2_flat], dim=1)
+
+        S_flat = model.S(points)
+        S = S_flat.reshape(X1.shape)
+
+        X1_np = X1.cpu().numpy()
+        X2_np = X2.cpu().numpy()
+        S_np = S.cpu().detach().numpy()
+
+        S_theor = -X1_np * (np.log(X1_np) - 1) - X2_np * (np.log(X2_np) - 1)
+
+        #ax7.plot_surface(X1_np, X2_np, S_np, label="learned")
+        ax4.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
+        distance = np.average(S_theor - S_np)
+        ax4.plot_surface(X1_np, X2_np, S_np + distance, label="learned, shifted")
+
+        ax4.set_title("Entropy S = S(x1, x2)")
+        ax4.legend()
+        
     plt.show()
