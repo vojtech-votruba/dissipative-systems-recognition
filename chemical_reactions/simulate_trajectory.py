@@ -81,7 +81,12 @@ if args.verbose:
     print("\nDone! Trajectories saved into ./data/dataset.txt")
 
 if args.plot:
-    plt.style.use("ggplot")
+    plt.style.use("bmh")
+    custom_cycler = plt.cycler(
+        color=['#6c3b9c', '#a02c2c', '#2c7a2c', '#2c2c7a', '#287d7d', '#aa5500', '#555555'],
+        linestyle=['-', '--', '-.', ':', (0, (3, 1, 1, 1)), (0, (5, 2)), (0, (1, 1))]
+    )
+    plt.rc('axes', prop_cycle=custom_cycler)
     
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
