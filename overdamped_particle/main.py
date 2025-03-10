@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
                                  description="A pytorch code for learning and testing state space\
                                  trajectory prediciton.")
 
-parser.add_argument("--epochs", default=500, type=int, help="number of epoches for the model to train")
+parser.add_argument("--epochs", default=300, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
 parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
@@ -545,7 +545,7 @@ if args.plot:
 
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
         ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
-        ax3.legend() 
+        ax3.legend()
 
         # Plotting entropy
         fig4 = plt.figure()
