@@ -14,9 +14,9 @@ parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
                                 description='A short script for generating gradient dynamics data used in a machine learning project.',)
 
 parser.add_argument("--num" , default=128, type=int, help="number of trajectories that we want to simulate")
-parser.add_argument("--points", default=4096, type=int, help="number of points for each trajectory")
+parser.add_argument("--points", default=2048, type=int, help="number of points for each trajectory")
 parser.add_argument("--dim", default=1, type=int, help="dimension of the data")
-parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
 parser.add_argument("--gamma", default=-1.0, type=float, help="the dampening constant")

@@ -359,71 +359,71 @@ if args.plot:
         ax0.plot(range(len(conservation_losses)), conservation_losses, label="conservation loss")
         ax0.legend()
 
-        # Sampling random trajectory and plotting it along with predicted trajectory
-        fig1 = plt.figure()
-        ax1 = fig1.add_subplot(projection="3d")
-        sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
-        tensor_sample = torch.tensor([sample], requires_grad=True)
-        time_set = [args.dt*i for i in range(len(sample))]
+    # Sampling random trajectory and plotting it along with predicted trajectory
+    fig1 = plt.figure()
+    ax1 = fig1.add_subplot(projection="3d")
+    sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
+    tensor_sample = torch.tensor([sample], requires_grad=True)
+    time_set = [args.dt*i for i in range(len(sample))]
 
-        ax1.set_xlabel("x1")
-        ax1.set_ylabel("x2")
-        ax1.set_zlabel("t")
+    ax1.set_xlabel("x1")
+    ax1.set_ylabel("x2")
+    ax1.set_zlabel("t")
 
-        ax1.plot(sample[:,0], sample[:,1], time_set, label="original data")
-        velocities = rk4(model.predict, tensor_sample, args.dt)
+    ax1.plot(sample[:,0], sample[:,1], time_set, label="original data")
+    velocities = rk4(model.predict, tensor_sample, args.dt)
 
-        prediction = [sample[0]]
+    prediction = [sample[0]]
 
-        for i in range(len(sample)):
-            prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
+    for i in range(len(sample)):
+        prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
 
-        ax1.set_title(f"Sample trajectory")
-        prediction = np.array(prediction)
+    ax1.set_title(f"Sample trajectory")
+    prediction = np.array(prediction)
 
-        ax1.plot(prediction[:-3,0], prediction[:-3,1], time_set[:-2], label="prediction")
-        ax1.legend()
+    ax1.plot(prediction[:-3,0], prediction[:-3,1], time_set[:-2], label="prediction")
+    ax1.legend()
 
-        # Plotting the dissipation potential, along our trajectory
-        fig2,ax2 = plt.subplots()
-        ax2.set_xlabel("t")
-        ax2.set_ylabel("Ψ")
+    # Plotting the dissipation potential, along our trajectory
+    fig2,ax2 = plt.subplots()
+    ax2.set_xlabel("t")
+    ax2.set_ylabel("Ψ")
 
-        sample_x_star = conjugate(tensor_sample)
-        potential_evolution = model(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
+    sample_x_star = conjugate(tensor_sample)
+    potential_evolution = model(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
 
-        ax2.plot(time_set, potential_evolution, label="learned")
+    ax2.plot(time_set, potential_evolution, label="learned")
 
-        ax2.set_title(f"Dissipation potential in time, along the given trajectory")
-        ax2.legend()
+    ax2.set_title(f"Dissipation potential in time, along the given trajectory")
+    ax2.legend()
 
-        # Plotting dissipation potential
-        fig3 = plt.figure()
-        ax3 = fig3.add_subplot(projection="3d")
-        ax3.set_xlabel("x1*")
-        ax3.set_ylabel("x2*")
+    # Plotting dissipation potential
+    fig3 = plt.figure()
+    ax3 = fig3.add_subplot(projection="3d")
+    ax3.set_xlabel("x1*")
+    ax3.set_ylabel("x2*")
 
-        x1_star = torch.linspace(-1,1,500, dtype=torch.float32)
-        x2_star = torch.linspace(-1,1,500, dtype=torch.float32)
+    x1_star = torch.linspace(-1,1,500, dtype=torch.float32)
+    x2_star = torch.linspace(-1,1,500, dtype=torch.float32)
 
-        X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
-        X1_star_flat = X1_star.flatten()
-        X2_star_flat = X2_star.flatten()
-        points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
+    X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
+    X1_star_flat = X1_star.flatten()
+    X2_star_flat = X2_star.flatten()
+    points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
 
-        zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
+    zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
 
-        Psi_flat = model(zeros_column, points)
-        Psi = Psi_flat.reshape(X1_star.shape)
+    Psi_flat = model(zeros_column, points)
+    Psi = Psi_flat.reshape(X1_star.shape)
 
-        X1_star_np = X1_star.cpu().numpy()
-        X2_star_np = X2_star.cpu().numpy()
-        Psi_np = Psi.cpu().detach().numpy()
-        ax3.set_title("Dissipation potential Ψ(0.2, x*)")
-        Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2) - 0.2
+    X1_star_np = X1_star.cpu().numpy()
+    X2_star_np = X2_star.cpu().numpy()
+    Psi_np = Psi.cpu().detach().numpy()
+    ax3.set_title("Dissipation potential Ψ(0.2, x*)")
+    Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2) - 0.2
 
-        ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
-        ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
-        ax3.legend()
+    ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
+    ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
+    ax3.legend()
 
     plt.show()

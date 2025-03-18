@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
                                  description="A pytorch code for learning and testing state space\
                                  trajectory prediciton.")
 
-parser.add_argument("--epochs", default=300, type=int, help="number of epoches for the model to train")
+parser.add_argument("--epochs", default=1000, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
 parser.add_argument("--dt", default=0.003, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
@@ -297,7 +297,7 @@ if args.train:
             targ_pos = targ_pos.to(DEVICE)
             targ_veloc = targ_veloc.to(DEVICE)
 
-            if i < args.epochs // 2:
+            if i < args.epochs // 1.1:
                 optimizer = adam_optimizer
                 optimizer.zero_grad()
 
@@ -416,104 +416,108 @@ if args.plot:
         ax0.plot(range(len(conservation_losses)), conservation_losses, label="conservation loss")
         ax0.legend()
 
-        # Sampling random trajectory and plotting it along with predicted trajectory
-        fig1 = plt.figure()
-        ax1 = fig1.add_subplot(projection="3d")
-        sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
-        tensor_sample = torch.tensor([sample], requires_grad=True)
-        time_set = [args.dt*i for i in range(len(sample))]
+    # Sampling random trajectory and plotting it along with predicted trajectory
+    fig1 = plt.figure()
+    ax1 = fig1.add_subplot(projection="3d")
+    sample = test_pos[np.random.randint(0,len(test_pos)-1)].cpu().detach().numpy()
+    tensor_sample = torch.tensor([sample], requires_grad=True)
+    time_set = [args.dt*i for i in range(len(sample))]
 
-        ax1.set_xlabel("x1")
-        ax1.set_ylabel("x2")
-        ax1.set_zlabel("t")
+    ax1.set_xlabel("x1")
+    ax1.set_ylabel("x2")
+    ax1.set_zlabel("t")
 
-        ax1.plot(sample[:,0], sample[:,1], time_set, label="original data")
-        velocities = rk4(model.predict, tensor_sample, args.dt)
+    ax1.plot(sample[:,0], sample[:,1], time_set, label="original data")
+    velocities = rk4(model.predict, tensor_sample, args.dt)
 
-        prediction = [sample[0]]
+    prediction = [sample[0]]
 
-        for i in range(len(sample)):
-            prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
+    for i in range(len(sample)):
+        prediction.append(prediction[i] + args.dt * velocities[0][i].cpu().detach().numpy())
 
-        ax1.set_title(f"Sample trajectory")
-        prediction = np.array(prediction)
+    ax1.set_title(f"Sample trajectory")
+    prediction = np.array(prediction)
 
-        ax1.plot(prediction[:-3,0], prediction[:-3,1], time_set[:-2], label="prediction")
-        ax1.legend()
+    ax1.plot(prediction[:-3,0], prediction[:-3,1], time_set[:-2], label="prediction")
+    ax1.legend()
 
-        # Plotting the dissipation potential, along our trajectory
-        fig2,ax2 = plt.subplots()
-        ax2.set_xlabel("t")
-        ax2.set_ylabel("Ψ")
+    # Plotting the dissipation potential, along our trajectory
+    fig2,ax2 = plt.subplots()
+    ax2.set_xlabel("t")
+    ax2.set_ylabel("Ψ")
 
-        S_sample = model.S(tensor_sample)
-        sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
-        potential_evolution = model(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
+    S_sample = model.S(tensor_sample)
+    sample_x_star = autograd.grad(S_sample, tensor_sample, grad_outputs=torch.ones_like(S_sample), create_graph=True)[0].float()
+    potential_evolution = model(tensor_sample, sample_x_star).squeeze(-1).squeeze(0).cpu().detach().numpy()
 
-        ax2.plot(time_set, potential_evolution, label="learned")
+    ax2.plot(time_set, potential_evolution, label="learned")
 
-        ax2.set_title(f"Dissipation potential in time, along the given trajectory")
-        ax2.legend()
+    ax2.set_title(f"Dissipation potential in time, along the given trajectory")
+    ax2.legend()
 
-        # Plotting dissipation potential
-        fig3 = plt.figure()
-        ax3 = fig3.add_subplot(projection="3d")
-        ax3.set_xlabel("x1*")
-        ax3.set_ylabel("x2*")
+    # Plotting dissipation potential
+    fig3 = plt.figure()
+    ax3 = fig3.add_subplot(projection="3d")
+    ax3.set_xlabel("x1*")
+    ax3.set_ylabel("x2*")
 
-        x1_star = torch.linspace(-1,1,500, dtype=torch.float32)
-        x2_star = torch.linspace(-1,1,500, dtype=torch.float32)
+    x1_star = torch.linspace(-1,1,500, dtype=torch.float32)
+    x2_star = torch.linspace(-1,1,500, dtype=torch.float32)
 
-        X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
-        X1_star_flat = X1_star.flatten()
-        X2_star_flat = X2_star.flatten()
-        points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
+    X1_star, X2_star = torch.meshgrid(x1_star, x2_star, indexing="ij")
+    X1_star_flat = X1_star.flatten()
+    X2_star_flat = X2_star.flatten()
+    points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
 
-        zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
+    zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
 
-        Psi_flat = model(zeros_column, points)
-        Psi = Psi_flat.reshape(X1_star.shape)
+    Psi_flat = model(zeros_column, points)
+    Psi = Psi_flat.reshape(X1_star.shape)
 
-        X1_star_np = X1_star.cpu().numpy()
-        X2_star_np = X2_star.cpu().numpy()
-        Psi_np = Psi.cpu().detach().numpy()
-        ax3.set_title("Dissipation potential Ψ(0.2, x*)")
-        Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2)
+    X1_star_np = X1_star.cpu().numpy()
+    X2_star_np = X2_star.cpu().numpy()
+    Psi_np = Psi.cpu().detach().numpy()
+    ax3.set_title("Dissipation potential Ψ(0.2, x*)")
+    Psi_theor = 0.2 * np.cosh((X1_star_np - X2_star_np) / 2) - 0.2
 
-        ax3.plot_surface(X1_star_np, X2_star_np, Psi_np, label="leared")
-        ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
-        ax3.legend()
+    scaling = np.sum(Psi_theor * Psi_np)/np.sum(Psi_theor*Psi_theor)
 
-        # Plotting entropy
-        fig4 = plt.figure()
-        ax4 = fig4.add_subplot(projection="3d")
-        ax4.set_xlabel("x1")
-        ax4.set_ylabel("x2")
-        ax4.set_zlabel("S")
+    ax3.plot_surface(X1_star_np, X2_star_np, Psi_np/scaling, label="learned; rescaled")
+    ax3.plot_surface(X1_star_np, X2_star_np, Psi_theor , label="analytic")
+    ax3.legend()
 
-        x1 = torch.linspace(0.001,1,500, dtype=torch.float32)
-        x2 = torch.linspace(0.001,1,500, dtype=torch.float32)
+    # Plotting entropy
+    fig4 = plt.figure()
+    ax4 = fig4.add_subplot(projection="3d")
+    ax4.set_xlabel("x1")
+    ax4.set_ylabel("x2")
+    ax4.set_zlabel("S")
 
-        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
-        X1_flat = X1.flatten()
-        X2_flat = X2.flatten()
-        points = torch.stack([X1_flat, X2_flat], dim=1)
+    x1 = torch.linspace(0.001,1,500, dtype=torch.float32)
+    x2 = torch.linspace(0.001,1,500, dtype=torch.float32)
 
-        S_flat = model.S(points)
-        S = S_flat.reshape(X1.shape)
+    X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
+    X1_flat = X1.flatten()
+    X2_flat = X2.flatten()
+    points = torch.stack([X1_flat, X2_flat], dim=1)
 
-        X1_np = X1.cpu().numpy()
-        X2_np = X2.cpu().numpy()
-        S_np = S.cpu().detach().numpy()
+    S_flat = model.S(points)
+    S = S_flat.reshape(X1.shape)
 
-        S_theor = -X1_np * (np.log(X1_np) - 1) - X2_np * (np.log(X2_np) - 1)
+    X1_np = X1.cpu().numpy()
+    X2_np = X2.cpu().numpy()
+    S_np = S.cpu().detach().numpy()
 
-        #ax7.plot_surface(X1_np, X2_np, S_np, label="learned")
-        ax4.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
-        distance = np.average(S_theor - S_np)
-        ax4.plot_surface(X1_np, X2_np, S_np + distance, label="learned, shifted")
+    S_theor = -X1_np * (np.log(X1_np) - 1) - X2_np * (np.log(X2_np) - 1)
 
-        ax4.set_title("Entropy S = S(x1, x2)")
-        ax4.legend()
+    #ax4.plot_surface(X1_np, X2_np, S_np, label="learned")
+    distance = np.average(S_theor - S_np)
+
+    ax4.plot_surface(X1_np, X2_np, S_np + distance, label="learned; shifted")
+    ax4.plot_surface(X1_np, X2_np, S_theor, label="analytic") 
+
+
+    ax4.set_title("Entropy S = S(x1, x2)")
+    ax4.legend()
         
     plt.show()
