@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
 
 parser.add_argument("--epochs", default=1000, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
-parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.005, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
 parser.add_argument('--plot', default=True, action=argparse.BooleanOptionalAction, help="option of plotting the loss function")
 parser.add_argument("--log", default=True, type=int, help="using log loss for plotting and such")
@@ -124,15 +124,15 @@ class EntropyNetwork(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.input_layer = nn.Linear(DIMENSION, 3)
+        self.input_layer = nn.Linear(DIMENSION, 5)
 
-        self.prop_layer1 = NegativeLinear(3, 3)
-        self.lateral_layer1 = nn.Linear(DIMENSION, 3)
+        self.prop_layer1 = NegativeLinear(5, 5)
+        self.lateral_layer1 = nn.Linear(DIMENSION, 5)
 
-        self.prop_layer2 = NegativeLinear(3, 3)
-        self.lateral_layer2 = nn.Linear(DIMENSION, 3)
+        self.prop_layer2 = NegativeLinear(5, 5)
+        self.lateral_layer2 = nn.Linear(DIMENSION, 5)
 
-        self.output_layer = NegativeLinear(3, 1)
+        self.output_layer = NegativeLinear(5, 1)
         self.lateral_layer_out = nn.Linear(DIMENSION, 1)
 
         self._initialize_weights()
@@ -164,35 +164,35 @@ class DissipationNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         # The branch that propagates x directly forward
-        self.x_input_layer = nn.Linear(DIMENSION, 3)
-        self.x_prop_layer1 = nn.Linear(3, 3)
-        self.x_prop_layer2 = nn.Linear(3, 3)
+        self.x_input_layer = nn.Linear(DIMENSION, 4)
+        self.x_prop_layer1 = nn.Linear(4, 4)
+        self.x_prop_layer2 = nn.Linear(4, 4)
 
         # The branch that goes directly between x and x_star
-        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 3)
-        self.x_lateral_layer_2 = nn.Linear(3, 3)
-        self.x_lateral_layer_3 = nn.Linear(3, 3)
-        self.x_lateral_layer_out = nn.Linear(3, 1)
+        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 4)
+        self.x_lateral_layer_2 = nn.Linear(4, 4)
+        self.x_lateral_layer_3 = nn.Linear(4, 4)
+        self.x_lateral_layer_out = nn.Linear(4, 1)
 
         # The branch that propagates x_star forward (We need to enforce convexity here)
-        self.conjugate_prop_layer_1 = PositiveLinear(3, 3, bias=False)
-        self.conjugate_prop_layer_2 = PositiveLinear(3, 3, bias=False)
-        self.conjugate_prop_layer_out= PositiveLinear(3, 1, bias=False)
+        self.conjugate_prop_layer_1 = PositiveLinear(4, 4, bias=False)
+        self.conjugate_prop_layer_2 = PositiveLinear(4, 4, bias=False)
+        self.conjugate_prop_layer_out= PositiveLinear(4, 1, bias=False)
 
-        self.conjugate_prop_layer_1_mid = nn.Linear(3, 3)
-        self.conjugate_prop_layer_2_mid = nn.Linear(3, 3)
-        self.conjugate_prop_layer_out_mid = nn.Linear(3, 3)
+        self.conjugate_prop_layer_1_mid = nn.Linear(4, 4)
+        self.conjugate_prop_layer_2_mid = nn.Linear(4, 4)
+        self.conjugate_prop_layer_out_mid = nn.Linear(4, 4)
 
         # The branch which always starts at x0_star and ends at arbitrary x_star
-        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 3, bias=False)
-        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 3, bias=False)
-        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 3, bias=False)
+        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 4, bias=False)
+        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 4, bias=False)
+        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 4, bias=False)
         self.conjugate_lateral_layer_out = nn.Linear(DIMENSION, 1, bias=False)
 
         self.conjugate_lateral_layer_in_mid = nn.Linear(DIMENSION, DIMENSION)
-        self.conjugate_lateral_layer_1_mid = nn.Linear(3, DIMENSION)
-        self.conjugate_lateral_layer_2_mid = nn.Linear(3, DIMENSION)
-        self.conjugate_lateral_layer_out_mid = nn.Linear(3, DIMENSION)
+        self.conjugate_lateral_layer_1_mid = nn.Linear(4, DIMENSION)
+        self.conjugate_lateral_layer_2_mid = nn.Linear(4, DIMENSION)
+        self.conjugate_lateral_layer_out_mid = nn.Linear(4, DIMENSION)
 
         self._initialize_weights()
 
@@ -259,8 +259,8 @@ if args.train:
     lbfgs_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size, shuffle=True, generator=generator)
     adam_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size // 2, shuffle=True, generator=generator)
 
-    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
+    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-1, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
 
     # Training
     trajectory_losses = []

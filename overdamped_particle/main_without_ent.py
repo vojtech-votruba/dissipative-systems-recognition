@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
 
 parser.add_argument("--epochs", default=1000, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
-parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.005, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
 parser.add_argument('--plot', default=True, action=argparse.BooleanOptionalAction, help="option of plotting the loss function")
 parser.add_argument("--log", default=True, type=int, help="using log loss for plotting and such")
@@ -206,8 +206,8 @@ if args.train:
     lbfgs_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size, shuffle=True, generator=generator)
     adam_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size // 2, shuffle=True, generator=generator)
 
-    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
+    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-1, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
 
     # Training
     trajectory_losses = []

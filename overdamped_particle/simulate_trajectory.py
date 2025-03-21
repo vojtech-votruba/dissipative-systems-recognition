@@ -16,10 +16,10 @@ parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
 parser.add_argument("--num" , default=128, type=int, help="number of trajectories that we want to simulate")
 parser.add_argument("--points", default=2048, type=int, help="number of points for each trajectory")
 parser.add_argument("--dim", default=1, type=int, help="dimension of the data")
-parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.005, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
-parser.add_argument("--gamma", default=-1.0, type=float, help="the dampening constant")
+parser.add_argument("--gamma", default=1.0, type=float, help="the dampening constant")
 args = parser.parse_args()
 
 def evolution(x):
@@ -27,7 +27,7 @@ def evolution(x):
         We are assuming the entropy to be something like S = 1/2 gamma x**2
         and the dissipation potential to be in the form 1/2 * x_star ** 2 - 1/2 * gamma**2 x**2
     """
-    return args.gamma * x
+    return -args.gamma * x
 
 def rk4(f, x, time_step):
     """
