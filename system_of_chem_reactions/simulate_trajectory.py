@@ -13,65 +13,73 @@ parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
                                 description='A short script for generating gradient dynamics data used in a machine learning project.',)
 
 parser.add_argument("--num" , default=128, type=int, help="number of trajectories that we want to simulate")
-parser.add_argument("--points", default=1028, type=int, help="number of points for each trajectory")
-parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--points", default=2048, type=int, help="number of points for each trajectory")
+parser.add_argument("--dt", default=0.002, type=float, help="size of the time step used in the simulation")
 parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
 parser.add_argument("--gamma", default=1.0, type=float, help="the speed constant")
 args = parser.parse_args()
 
 """
-    Each row represents one species, each column one chemical reaction
+Each row represents one species, each column one chemical reaction
 
     Example 1 (simplest reversible reaction):
     A <-> B
 
 stoichiometric_matrix = np.array([
-[-1, 1,],
-[1, -1,],])
+[-1.0],
+[+1.0],])
                                 
-    Example 2 (periodic reaction):
-    A -> B
-    B -> C
-    C -> A
+    Example 2 (water creation):
+    2A + B <-> 2C
 
 stoichiometric_matrix = np.array([
-[-1,  0,  1],
-[ 1, -1,  0],
-[ 0,  1, -1],])
+[-2.0],
+[-1.0],
+[+2.0],])
 
-    Example 3 (simple reaction network):
-    2A + B <-> C + 3D
-    A + 2C <-> B
+    Example 3 (a more complex reversible reaction):
+    A + B <-> C
+    C + D <-> B + E
 
 stoichiometric_matrix = np.array([
-[-2, +2, -1, +1],
-[-1, +1, +1, -1],
-[+1, -1, -2, +2],
-[+3, -3, +0, +0],])
+[-1.0,+0.0],
+[-1.0,+1.0],
+[+1.0,-1.0],
+[+0.0,-1.0],
+[+0.0,+1.0],])
 """
 
 stoichiometric_matrix = np.array([
-[-1,  0,  1],
-[ 1, -1,  0],
-[ 0,  1, -1],])
+[-1.0,+0.0],
+[-1.0,+1.0],
+[+1.0,-1.0],
+[+0.0,-1.0],
+[+0.0,+1.0],])
 
 def evolution(x):
     """
         The evolution is calculated using mass action law.
 
-        In gradient dynamcis: we describe this with the entropy being S_i = -c_i (ln(c_i) - 1),
-        and the dissipation potential in the form gamma*sqrt(c1c2) cos((c1*-c2*) / 2) - gamma*sqrt(c1c2)
-
-        We are setting all forward and backward rates to 1/4
+        We are setting all forward and backward rates to 1
     """
 
     kinetics = np.ones(shape=stoichiometric_matrix.shape[1])
     for j in range(stoichiometric_matrix.shape[1]):
+        forward = 1
+        backward = 1
+
         for i in range(stoichiometric_matrix.shape[0]):
-            if stoichiometric_matrix[i,j] < 0:
-                kinetics[j] *= x[i] ** abs(stoichiometric_matrix[i, j])
-    
+            if stoichiometric_matrix[i, j] < 0:
+                forward *= x[i] ** abs(stoichiometric_matrix[i, j])
+            elif stoichiometric_matrix[i, j] > 0:
+                if x[i] > 0:
+                    backward *= x[i] ** abs(stoichiometric_matrix[i, j])
+                else:
+                    backward = 0
+
+        kinetics[j] = forward - backward
+        
     x_dot = args.gamma * stoichiometric_matrix @ kinetics
     return x_dot
 
@@ -91,8 +99,8 @@ data = []
 np.random.seed(42)
 
 for n in range(args.num):
-    x = np.array([random.uniform(0,1) for j in range(stoichiometric_matrix.shape[1])])
-    x_dot = np.array([0 for j in range(stoichiometric_matrix.shape[1])])
+    x = np.array([random.uniform(0.001,1) for j in range(stoichiometric_matrix.shape[0])])
+    x_dot = np.array([0 for j in range(stoichiometric_matrix.shape[0])])
     
     time = 0
     dataset = []
@@ -151,7 +159,7 @@ if args.plot:
         ax.set_xlabel("t")
         ax.set_ylabel("c")
     
-        for i in range(stoichiometric_matrix.shape[1]):
+        for i in range(stoichiometric_matrix.shape[0]):
             ax.plot(random_trajectory[:,0], random_trajectory[:,i+1], label=f"Species {i+1}")
         
         ax.legend()

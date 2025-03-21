@@ -8,7 +8,6 @@ from torch import nn
 from torch import autograd
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import random_split
-from functorch import make_functional, vmap, vjp, jvp, jacrev
 from matplotlib import pyplot as plt
 
 # Adding some arguments
@@ -18,7 +17,7 @@ parser = argparse.ArgumentParser(prog="learn_and_test.py",
 
 parser.add_argument("--epochs", default=1000, type=int, help="number of epoches for the model to train")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size for training of the model")
-parser.add_argument("--dt", default=0.006, type=float, help="size of the time step used in the simulation")
+parser.add_argument("--dt", default=0.002, type=float, help="size of the time step used in the simulation")
 parser.add_argument('--train', default=True, action=argparse.BooleanOptionalAction, help="do you wish to train a new model?")
 parser.add_argument('--plot', default=True, action=argparse.BooleanOptionalAction, help="option of plotting the loss function")
 parser.add_argument("--log", default=True, type=int, help="using log loss for plotting and such")
@@ -114,35 +113,29 @@ class DissipationNetwork(nn.Module):
     def __init__(self):
         super().__init__()
         # The branch that propagates x directly forward
-        self.x_input_layer = nn.Linear(DIMENSION, 3)
-        self.x_prop_layer1 = nn.Linear(3, 3)
-        self.x_prop_layer2 = nn.Linear(3, 3)
+        self.x_input_layer = nn.Linear(DIMENSION, 6)
+        self.x_prop_layer1 = nn.Linear(6, 6)
 
         # The branch that goes directly between x and x_star
-        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 3)
-        self.x_lateral_layer_2 = nn.Linear(3, 3)
-        self.x_lateral_layer_3 = nn.Linear(3, 3)
-        self.x_lateral_layer_out = nn.Linear(3, 1)
+        self.x_lateral_layer_1 = nn.Linear(DIMENSION, 6)
+        self.x_lateral_layer_2 = nn.Linear(6, 6)
+        self.x_lateral_layer_out = nn.Linear(6, 1)
 
         # The branch that propagates x_star forward (We need to enforce convexity here)
-        self.conjugate_prop_layer_1 = PositiveLinear(3, 3, bias=False)
-        self.conjugate_prop_layer_2 = PositiveLinear(3, 3, bias=False)
-        self.conjugate_prop_layer_out= PositiveLinear(3, 1, bias=False)
+        self.conjugate_prop_layer_1 = PositiveLinear(6, 6, bias=False)
+        self.conjugate_prop_layer_out= PositiveLinear(6, 1, bias=False)
 
-        self.conjugate_prop_layer_1_mid = nn.Linear(3, 3)
-        self.conjugate_prop_layer_2_mid = nn.Linear(3, 3)
-        self.conjugate_prop_layer_out_mid = nn.Linear(3, 3)
+        self.conjugate_prop_layer_1_mid = nn.Linear(6, 6)
+        self.conjugate_prop_layer_out_mid = nn.Linear(6, 6)
 
         # The branch which always starts at x0_star and ends at arbitrary x_star
-        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 3, bias=False)
-        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 3, bias=False)
-        self.conjugate_lateral_layer_2 = nn.Linear(DIMENSION, 3, bias=False)
+        self.conjugate_lateral_layer_in = nn.Linear(DIMENSION, 6, bias=False)
+        self.conjugate_lateral_layer_1 = nn.Linear(DIMENSION, 6, bias=False)
         self.conjugate_lateral_layer_out = nn.Linear(DIMENSION, 1, bias=False)
 
         self.conjugate_lateral_layer_in_mid = nn.Linear(DIMENSION, DIMENSION)
-        self.conjugate_lateral_layer_1_mid = nn.Linear(3, DIMENSION)
-        self.conjugate_lateral_layer_2_mid = nn.Linear(3, DIMENSION)
-        self.conjugate_lateral_layer_out_mid = nn.Linear(3, DIMENSION)
+        self.conjugate_lateral_layer_1_mid = nn.Linear(6, DIMENSION)
+        self.conjugate_lateral_layer_out_mid = nn.Linear(6, DIMENSION)
 
         self._initialize_weights()
 
@@ -153,9 +146,9 @@ class DissipationNetwork(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-    def forward(self, input, input_star):
-        x0 = input
-        x0_star = input_star
+    def forward(self, state, state_conjugate):
+        x0 = state
+        x0_star = state_conjugate
 
         x_star = nn.Softplus()(self.x_lateral_layer_1(x0) 
                                + self.conjugate_lateral_layer_in(torch.mul(x0_star, self.conjugate_lateral_layer_in_mid(x0))))
@@ -166,16 +159,11 @@ class DissipationNetwork(nn.Module):
                                 + self.conjugate_lateral_layer_1(torch.mul(x0_star, self.conjugate_lateral_layer_1_mid(x))))
         x = nn.Softplus()(self.x_prop_layer1(x))
 
-        x_star = nn.Softplus()(self.x_lateral_layer_3(x) 
-                               + self.conjugate_prop_layer_2(torch.mul(x_star, nn.Softplus()(self.conjugate_prop_layer_2_mid(x))))
-                                + self.conjugate_lateral_layer_2(torch.mul(x0_star, self.conjugate_lateral_layer_2_mid(x))))
-        x = nn.Softplus()(self.x_prop_layer2(x))
-
-        out = nn.Softplus()(self.x_lateral_layer_out(x) 
+        Xi_out = nn.Softplus()(self.x_lateral_layer_out(x) 
                             + self.conjugate_prop_layer_out(torch.mul(x_star, nn.Softplus()(self.conjugate_prop_layer_out_mid(x))))\
                                 + self.conjugate_lateral_layer_out(torch.mul(x0_star, self.conjugate_lateral_layer_out_mid(x))))
 
-        return out
+        return Xi_out
 
 class GradientDynamics(nn.Module):
     def __init__(self):
@@ -184,7 +172,6 @@ class GradientDynamics(nn.Module):
 
     def forward(self, x, x_star):
         x_star_zeros = torch.zeros_like(x, requires_grad=True)
-
         Xi_raw = self.Xi(x, x_star)
         Xi_at_zero = self.Xi(x, x_star_zeros)
         Xi = Xi_raw - Xi_at_zero - (x_star * autograd.grad(Xi_at_zero, x_star_zeros, grad_outputs=torch.ones_like(Xi_at_zero), create_graph=True)[0]).sum(dim=-1).unsqueeze(-1)
@@ -194,8 +181,8 @@ class GradientDynamics(nn.Module):
     def predict(self, x):
         x_star = conjugate(x)
         Xi = self.forward(x,x_star)
-
         x_dot = autograd.grad(Xi, x_star, grad_outputs=torch.ones_like(Xi), create_graph=True)[0]
+
         return x_dot
 
 L = nn.MSELoss()
@@ -207,8 +194,8 @@ if args.train:
     lbfgs_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size, shuffle=True, generator=generator)
     adam_dataloader = DataLoader(dataset=training_trajectories, batch_size=args.batch_size // 2, shuffle=True, generator=generator)
 
-    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, amsgrad=True)
-    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-3, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
+    adam_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+    lbfgs_optimizer = torch.optim.LBFGS(model.parameters(), lr=1e-1, max_iter=10, history_size=20, line_search_fn='strong_wolfe')
 
     # Training
     trajectory_losses = []
@@ -221,6 +208,7 @@ if args.train:
         else:
             dataloader = lbfgs_dataloader
             optimizer = lbfgs_optimizer
+
         for j, (pos, veloc, targ_pos, targ_veloc) in enumerate(dataloader):
             pos = pos.to(DEVICE)
             veloc = veloc.to(DEVICE)
@@ -234,13 +222,10 @@ if args.train:
                 trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos) / torch.std(targ_pos)
                 velocity_loss = L(predicted_veloc, veloc) / torch.std(veloc)
 
-                loss = (
-                    trajectory_loss +
-                    velocity_loss
-                )
+                loss = velocity_loss
                 loss.backward()
-
                 optimizer.step()
+
             else:
                 def closure():
                     optimizer.zero_grad()
@@ -249,12 +234,8 @@ if args.train:
                     trajectory_loss = L(predicted_veloc * args.dt + pos, targ_pos) / torch.std(targ_pos)
                     velocity_loss = L(predicted_veloc, veloc) / torch.std(veloc)
 
-                    loss = (
-                        trajectory_loss +
-                        velocity_loss
-                    )
+                    loss = velocity_loss
                     loss.backward()
-                    
                     return loss
 
                 optimizer.step(closure)
@@ -277,6 +258,7 @@ if args.train:
     else:
         os.mkdir("models")
         torch.save(model.state_dict(), "models/model.pth")
+
 else:
     model = GradientDynamics().to(DEVICE)
     model.load_state_dict(torch.load("models/model.pth", weights_only=True))
@@ -315,9 +297,17 @@ if args.plot:
             ax0.set_title("Training log loss decline on the training data")
         else:
             ax0.set_title("Training loss decline on the training data")
+
         ax0.plot(range(len(trajectory_losses)), trajectory_losses, label="trajectory loss")
         ax0.plot(range(len(velocity_losses)), velocity_losses, label="velocity loss")
         ax0.legend()
+
+    stoichiometric_matrix = torch.tensor([
+    [-1.0,+0.0],
+    [-1.0,+1.0],
+    [+1.0,-1.0],
+    [+0.0,-1.0],
+    [+0.0,+1.0],], dtype=torch.float32)
 
     if DIMENSION == 2:
         # Sampling random trajectory and plotting it along with predicted trajectory
@@ -330,6 +320,7 @@ if args.plot:
         ax1.set_xlabel("c1")
         ax1.set_ylabel("c2")
         ax1.set_zlabel("t")
+        ax1.set_title(f"Sample trajectory")
 
         prediction = [sample[0]]
         print("calculating sample trajectory... it shouldn't take too long")
@@ -337,7 +328,6 @@ if args.plot:
             velocity = rk4(model.predict, torch.tensor(prediction[i], requires_grad=True), args.dt)
             prediction.append(prediction[i] + args.dt * velocity.cpu().detach().numpy())
 
-        ax1.set_title(f"Sample trajectory")
         prediction = np.array(prediction)
 
         ax1.plot(sample[:,0], sample[:,1], time_set, label="original data")
@@ -349,6 +339,7 @@ if args.plot:
         ax3 = fig3.add_subplot(projection="3d")
         ax3.set_xlabel("c1*")
         ax3.set_ylabel("c2*")
+        ax3.set_title("Dissipation potential Ξ(0.2, x*)")
 
         x1_star = torch.linspace(-1,1,500, dtype=torch.float32)
         x2_star = torch.linspace(-1,1,500, dtype=torch.float32)
@@ -358,22 +349,31 @@ if args.plot:
         X2_star_flat = X2_star.flatten()
         points = torch.stack([X1_star_flat, X2_star_flat], dim=1)
 
-        zeros_column = torch.zeros_like(points, dtype=torch.float32) + 0.2
+        dummy_x_input = torch.zeros_like(points, dtype=torch.float32) + 0.2
 
-        Xi_flat = model(zeros_column, points)
-        Xi = Xi_flat.reshape(X1_star.shape)
+        Xi_flat = model(dummy_x_input, points)
+        Xi_predicted = Xi_flat.reshape(X1_star.shape).cpu().detach().numpy()
 
         X1_star_np = X1_star.cpu().numpy()
         X2_star_np = X2_star.cpu().numpy()
-        Xi_np = Xi.cpu().detach().numpy()
-        ax3.set_title("Dissipation potential Ξ(0.2, x*)")
-        Xi_theor = 0.2 * 4 * (np.cosh((X1_star_np - X2_star_np) / 2) - 1)
 
-        ax3.plot_surface(X1_star_np, X2_star_np, Xi_np, label="leared")
-        ax3.plot_surface(X1_star_np, X2_star_np, Xi_theor , label="analytic")
+        X = torch.matmul(points, -stoichiometric_matrix)
+
+        Xi_analytic = 0
+        for l in range(stoichiometric_matrix.shape[1]):
+            W_l = 1
+            for q in range(stoichiometric_matrix.shape[0]):
+                W_l *= torch.sqrt((1e-7 + dummy_x_input[...,q]) ** abs(stoichiometric_matrix[q,l]))
+
+            Xi_analytic += 2*W_l * (torch.exp(X[...,l]/2) + torch.exp(-X[...,l]/2) - 2)
+
+        Xi_analytic = Xi_analytic.reshape(X1_star.shape).cpu()
+
+        ax3.plot_surface(X1_star_np, X2_star_np, Xi_predicted, label="leared")
+        ax3.plot_surface(X1_star_np, X2_star_np, Xi_analytic, label="analytic")
         ax3.legend()
 
-    else:        
+    else:
         # Sampling random trajectory and plotting it along with predicted trajectory
         fig1, axes1 = plt.subplots(2, int(np.ceil(DIMENSION / 2)))
         axes1 = axes1.flatten()
@@ -403,14 +403,10 @@ if args.plot:
 
         for i in range(DIMENSION, len(axes1)):
             fig1.delaxes(axes1[i])
-    
+
         # Plotting dissipation potential
         fig3, axes3 = plt.subplots(2, int(np.ceil(DIMENSION / 2)))
         axes3 = axes3.flatten()
-
-        stoichiometric_matrix = torch.tensor([
-        [-1, 1,],
-        [1, -1,],])
 
         for d in range(DIMENSION):
             graph = axes3[d]
@@ -421,28 +417,24 @@ if args.plot:
             x_star_inputs[:,d] = x_star
             Xi_predicted = model(x_inputs, x_star_inputs).cpu().detach()
 
+            X = torch.matmul(x_star_inputs, -stoichiometric_matrix)
+
             Xi_analytic = 0
             for l in range(stoichiometric_matrix.shape[1]):
                 W_l = 1
                 for q in range(stoichiometric_matrix.shape[0]):
-                    W_l *= torch.sqrt(x_inputs[:,q] ** torch.abs(stoichiometric_matrix[q,l]))
+                    W_l *= torch.sqrt((1e-7 + x_inputs[...,q]) ** abs(stoichiometric_matrix[q,l]))
 
-                X_l = 0
-                for q in range(stoichiometric_matrix.shape[0]):
-                    X_l += x_star_inputs[:,q] * stoichiometric_matrix[q,l]
-
-                Xi_analytic += W_l * (torch.exp(X_l/2) + torch.exp(-X_l/2) - 2)
+                Xi_analytic += 2*W_l * (torch.exp(X[...,l]/2) + torch.exp(-X[...,l]/2) - 2)
 
             graph.plot(x_star.cpu(), Xi_predicted, label="learned")
             graph.plot(x_star.cpu(), Xi_analytic.cpu().numpy(), label="analytic")
 
             graph.set_xlabel(f"x*_{d+1}")
-            #graph.set_ylabel(f"Ξ(0.2, 0.2, ..., 0, ..., x*_{d+1}, ..., 0)")
             graph.set_ylabel("Ξ")
             graph.legend()
 
         for i in range(DIMENSION, len(axes3)):
             fig3.delaxes(axes3[i])
-        
-    plt.tight_layout()
+
     plt.show()
