@@ -1,8 +1,8 @@
 import argparse
 import numpy as np
-import random
 import os
 from matplotlib import pyplot as plt
+import scienceplots
 
 """
     Code for generating simple trajectories in the spirit of gradient dynamics.
@@ -24,8 +24,8 @@ args = parser.parse_args()
 
 def evolution(x):
     """
-        We are assuming the entropy to be something like S = 1/2 gamma x**2
-        and the dissipation potential to be in the form 1/2 * x_star ** 2 - 1/2 * gamma**2 x**2
+        We are assuming the entropy to be something like S = -1/2 x**2
+        and the dissipation potential to be in the form 1/2 * gamma * x_star ** 2
     """
     return -args.gamma * x
 
@@ -42,16 +42,16 @@ def rk4(f, x, time_step):
     return 1/6 * (k1i + 2*k2i + 2*k3i + k4i)
 
 data = []
-np.random.seed(42)
+np.random.seed(21)
 
 for n in range(args.num):
-    x = np.array([random.uniform(-1,1) for i in range(args.dim)])
+    x = np.array([np.random.uniform(-1,1) for i in range(args.dim)])
     x_dot = np.array([0 for i in range(args.dim)])
     
     time = 0
     dataset = []
     for i in range(args.points):
-        dataset.append([time] + [each for each in x] + [each for each in x_dot])
+        dataset.append([time] + [each for each in x])
 
         x_dot = rk4(evolution, x, args.dt)
         x += x_dot * args.dt
@@ -77,21 +77,18 @@ else:
             f.write("\n".encode())
 
 if args.verbose:
-    print("\nDone! Trajectories saved into ./data/dataset.txt")
+    print("\n Done! Trajectories saved into ./data/dataset.txt")
 
 if args.plot:
-    plt.style.use("bmh")
-    custom_cycler = plt.cycler(
-        color=['#6c3b9c', '#a02c2c', '#2c7a2c', '#2c2c7a', '#287d7d', '#aa5500', '#555555'],
-        linestyle=['-', '--', '-.', ':', (0, (3, 1, 1, 1)), (0, (5, 2)), (0, (1, 1))]
-    )
-    plt.rc('axes', prop_cycle=custom_cycler)
+    plt.style.use(['science','ieee'])
     
     if args.dim == 1:
-        plt.xlabel("t")
-        plt.ylabel("x")
+        plt.xlabel(r"$t$")
+        plt.ylabel(r"$x$")
         random_trajectory = data[np.random.randint(0,args.num-1)]
         plt.plot(random_trajectory[:,0], random_trajectory[:,1])
+        plt.savefig("results/example.pdf")
+
         plt.show()
     
     elif args.dim == 2:
@@ -99,10 +96,12 @@ if args.plot:
         ax = fig.add_subplot(projection="3d")
         random_trajectory = data[np.random.randint(0,args.num-1)]
 
-        ax.set_xlabel("x1")
-        ax.set_ylabel("x2")
-        ax.set_zlabel("t")
+        ax.set_xlabel(r"$x_1$")
+        ax.set_ylabel(r"$x_2$")
+        ax.set_zlabel(r"$t$",labelpad=-4)
         ax.plot(random_trajectory[:,1], random_trajectory[:,2], random_trajectory[:,0], label="original data")
+
+        plt.savefig("results/example2d.pdf")
         plt.show()
         
     else:
