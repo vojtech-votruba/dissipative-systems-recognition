@@ -98,7 +98,7 @@ if args.plot:
 
         ax.set_xlabel(r"$x_1$")
         ax.set_ylabel(r"$x_2$")
-        ax.set_zlabel(r"$t$",labelpad=-4)
+        ax.set_zlabel(r"$t$", labelpad=-4)
         ax.plot(random_trajectory[:,1], random_trajectory[:,2], random_trajectory[:,0], label="original data")
 
         plt.savefig("results/example2d.pdf")
