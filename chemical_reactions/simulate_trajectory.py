@@ -15,7 +15,6 @@ parser = argparse.ArgumentParser(prog='simulate_trajectory.py',
 parser.add_argument("--num" , default=128, type=int, help="number of trajectories that we want to simulate")
 parser.add_argument("--points", default=2048, type=int, help="number of points for each trajectory")
 parser.add_argument("--dt", default=0.005, type=float, help="size of the time step used in the simulation")
-parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
 args = parser.parse_args()
 
@@ -93,23 +92,21 @@ data = []
 np.random.seed(50)
 
 for n in range(args.num):
-    x = np.array([np.random.uniform(0.001,1) for j in range(stoichiometric_matrix.shape[0])])
-    x_dot = np.array([0 for j in range(stoichiometric_matrix.shape[0])])
+    c = np.array([np.random.uniform(0.001,1) for j in range(stoichiometric_matrix.shape[0])])
     
     time = 0
     dataset = []
     for i in range(args.points):
-        dataset.append([time] + [each for each in x])
+        dataset.append([time] + [each for each in c])
 
-        x_dot = rk4(evolution, x, args.dt)
-        x += x_dot * args.dt
+        c_dot = rk4(evolution, c, args.dt)
+        c += c_dot * args.dt
         time += args.dt
 
     dataset = np.array(dataset)
     data.append(dataset)
 
-    if args.verbose:
-            print(f"{n}/{args.num}", end='\r')
+    print(f"{n}/{args.num}", end='\r')
 
 if os.path.exists("data"):
     os.remove("data/dataset.txt")
@@ -124,8 +121,7 @@ else:
             np.savetxt(f, trajectory, delimiter=",")
             f.write("\n".encode())
 
-if args.verbose:
-    print("\nDone! Trajectories saved into ./data/dataset.txt")
+print("\nDone! Trajectories saved into ./data/dataset.txt")
 
 if args.plot:
     plt.style.use(['science','ieee'])

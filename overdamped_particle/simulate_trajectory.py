@@ -17,7 +17,6 @@ parser.add_argument("--num" , default=128, type=int, help="number of trajectorie
 parser.add_argument("--points", default=2048, type=int, help="number of points for each trajectory")
 parser.add_argument("--dim", default=1, type=int, help="dimension of the data")
 parser.add_argument("--dt", default=0.005, type=float, help="size of the time step used in the simulation")
-parser.add_argument("--verbose", default=True, type=bool, help="print progress")
 parser.add_argument("--plot", default=True, type=bool, help="plot the results")
 parser.add_argument("--gamma", default=1.0, type=float, help="the dampening constant")
 args = parser.parse_args()
@@ -46,7 +45,6 @@ np.random.seed(21)
 
 for n in range(args.num):
     x = np.array([np.random.uniform(-1,1) for i in range(args.dim)])
-    x_dot = np.array([0 for i in range(args.dim)])
     
     time = 0
     dataset = []
@@ -60,8 +58,7 @@ for n in range(args.num):
     dataset = np.array(dataset)
     data.append(dataset)
 
-    if args.verbose:
-            print(f"{n}/{args.num}", end='\r')
+    print(f"{n}/{args.num}", end='\r')
 
 if os.path.exists("data"):
     os.remove("data/dataset.txt")
@@ -76,8 +73,7 @@ else:
             np.savetxt(f, trajectory, delimiter=",")
             f.write("\n".encode())
 
-if args.verbose:
-    print("\n Done! Trajectories saved into ./data/dataset.txt")
+print("\n Done! Trajectories saved into ./data/dataset.txt")
 
 if args.plot:
     plt.style.use(['science','ieee'])
