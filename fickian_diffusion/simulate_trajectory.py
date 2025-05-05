@@ -51,6 +51,7 @@ def exp_peak_init(dist, x):
     return np.exp(-100*(x-(0.5-dist))**2) + np.exp(-100*(x-(0.5+dist))**2)
 
 def fourier_init(N, x, p=1.5):
+    f = np.zeros_like(x)
     constant_term = np.random.uniform(-0.5, 0.5)
     f += constant_term
 
@@ -86,9 +87,9 @@ def rk4(f, x, time_step):
 data = []
 
 for n in range(args.num):
-    #c = fourier_init(np.random.randint(1, 15), X_GRID)
+    c = fourier_init(np.random.randint(1, 15), X_GRID)
     #c = polynomial_init(np.random.randint(1, 5), X_GRID)
-    c = discont_init(np.random.randint(1, 5), X_GRID)
+    #c = discont_init(np.random.randint(1, 5), X_GRID)
     #c = exp_peak_init(np.random.uniform(0.1,0.35), X_GRID)
 
     c = c/np.linalg.norm(c)
